@@ -1,0 +1,331 @@
+openapi: 3.1.0
+info:
+  title: TableBot API
+  version: 0.1.0
+  description: |
+    Backend for the TableBot Telegram Mini App.
+
+    Every endpoint except `/health` requires
+    `Authorization: tma <initData>` (the raw `Telegram.WebApp.initData`).
+    When the server runs with `APP_ENV=dev`, `Authorization: dev <telegram_id>`
+    is also accepted.
+
+    Errors always use the `Error` schema.
+servers:
+  - url: /api
+
+security:
+  - telegramInitData: []
+
+tags:
+  - name: system
+  - name: restaurants
+  - name: bookings
+  - name: staff
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness + database check
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /me:
+    get:
+      tags: [system]
+      summary: Current user and role
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /restaurants:
+    get:
+      tags: [restaurants]
+      summary: List restaurants
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Restaurant" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /restaurants/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [restaurants]
+      summary: Get a restaurant
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Restaurant" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /restaurants/{id}/slots:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [restaurants]
+      summary: Available time slots for a date and party size
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date, examples: ["2026-10-01"] }
+        - name: guests
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [date, guests, items]
+                properties:
+                  date: { type: string, format: date }
+                  guests: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Slot" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /bookings:
+    post:
+      tags: [bookings]
+      summary: Create a booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateBookingRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409":
+          description: Slot is full
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /bookings/my:
+    get:
+      tags: [bookings]
+      summary: The current user's bookings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Booking" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /bookings/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [bookings]
+      summary: Cancel one of the current user's bookings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /staff/bookings:
+    get:
+      tags: [staff]
+      summary: Bookings at the staff member's restaurants for a date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [date, items]
+                properties:
+                  date: { type: string, format: date }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/StaffBooking" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /staff/bookings/{id}/confirm:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [staff]
+      summary: Confirm a pending booking
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaffBooking" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    telegramInitData:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: '"tma <initData>", or "dev <telegram_id>" when APP_ENV=dev.'
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64, minimum: 1 }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Machine-readable code.
+          enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, conflict, internal, not_implemented, unavailable]
+        message:
+          type: string
+          description: Human-readable explanation.
+
+    User:
+      type: object
+      required: [id, first_name]
+      properties:
+        id: { type: integer, format: int64, description: Telegram user id }
+        first_name: { type: string }
+        last_name: { type: string }
+        username: { type: string }
+        language_code: { type: string }
+        is_premium: { type: boolean }
+        photo_url: { type: string }
+
+    Me:
+      type: object
+      required: [user, role]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        role: { type: string, enum: [customer, staff, admin] }
+
+    Restaurant:
+      type: object
+      required: [id, name, address, description, timezone]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        address: { type: string }
+        description: { type: string }
+        timezone: { type: string, examples: [Asia/Almaty] }
+
+    Slot:
+      type: object
+      required: [starts_at, available]
+      properties:
+        starts_at: { type: string, format: date-time }
+        available: { type: integer, description: Guests that can still be seated }
+
+    BookingStatus:
+      type: string
+      enum: [pending, confirmed, cancelled, completed, no_show]
+
+    CreateBookingRequest:
+      type: object
+      required: [restaurant_id, starts_at, guests]
+      additionalProperties: false
+      properties:
+        restaurant_id: { type: integer, format: int64 }
+        starts_at: { type: string, format: date-time }
+        guests: { type: integer, minimum: 1, maximum: 20 }
+        special_request: { type: string, maxLength: 500 }
+
+    Booking:
+      type: object
+      required: [id, restaurant_id, restaurant_name, starts_at, guests, status, special_request, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        restaurant_id: { type: integer, format: int64 }
+        restaurant_name: { type: string }
+        starts_at: { type: string, format: date-time }
+        guests: { type: integer }
+        status: { $ref: "#/components/schemas/BookingStatus" }
+        special_request: { type: string }
+        created_at: { type: string, format: date-time }
+
+    StaffBooking:
+      type: object
+      required: [id, restaurant_id, starts_at, guests, status, special_request, customer_name]
+      properties:
+        id: { type: integer, format: int64 }
+        restaurant_id: { type: integer, format: int64 }
+        starts_at: { type: string, format: date-time }
+        guests: { type: integer }
+        status: { $ref: "#/components/schemas/BookingStatus" }
+        special_request: { type: string }
+        customer_name: { type: string }
