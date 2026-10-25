@@ -52,6 +52,15 @@ id is a plain customer. Users are created automatically on their first request.
 4. To receive owner notifications, run `make seed OWNER=<your telegram id>` and
    press **Start** in the bot once (Telegram only lets bots message users who did).
 
+### Production
+
+One Ubuntu VM with Docker Compose and Caddy (automatic HTTPS); GitHub Actions deploys every
+push to `main`. Step-by-step runbook: [`docs/deploy.md`](docs/deploy.md).
+
+> **One bot token, one place.** Telegram allows only one long-polling consumer per bot
+> token. Your laptop uses the **dev** bot's token, the server uses the **prod** bot's
+> token. Never run the same token in two places at once, or the bot ignores updates at random.
+
 ### Full stack in Docker
 
 ```bash
@@ -74,7 +83,9 @@ Set `SITE_ADDRESS=your.domain` for automatic HTTPS via Caddy.
 | `make test` | `go test -race ./...` (DB tests are skipped) |
 | `make test-db` | All tests including DB integration tests, against `tablebot_test` in the compose Postgres |
 | `make lint` | gofmt check, `go vet`, golangci-lint if installed |
-| `make up` / `down` / `logs` | Full docker stack |
+| `make up` / `down` / `logs` | Full docker stack (local) |
+| `make prod-up` / `prod-logs` / `prod-ps` / `prod-psql` / `prod-backup` | On the server: deploy the checkout, logs, status, DB shell, backup |
+| `make prod-seed OWNER=<id>` | On the server: demo venues owned by your Telegram id |
 
 ## Environment variables
 
@@ -165,9 +176,14 @@ frontend/
   src/stores/         session (me/role), booking (last created booking)
   src/router/         routes + staff guard
 deploy/
-  docker-compose.yml  postgres, migrate (one-shot), api, caddy
+  docker-compose.yml       postgres, migrate (one-shot), api, caddy
+  docker-compose.prod.yml  production overrides (no DB port, built web image, log limits)
+  web.Dockerfile           Vue build + Caddy image for production
   Caddyfile
+  server-setup.sh          one-time VM setup; deploy.sh: deploy + health check; backup.sh
+  .env.production.example
 docs/api.yaml
+docs/deploy.md            production runbook
 ```
 
 ### Schema notes

@@ -20,3 +20,6 @@ frontend/dist/
 !.vscode/extensions.json
 .DS_Store
 *.log
+
+# Server database backups (deploy/backup.sh)
+backups/

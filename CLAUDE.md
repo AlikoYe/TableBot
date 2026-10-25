@@ -29,7 +29,8 @@ backend/
   static/plans/         floor plan SVGs, embedded and served at /api/static/plans/{file}
 docs/api.yaml           the API contract (OpenAPI 3.1)
 frontend/               Vue app — NOT ours, never touch it in backend tasks
-deploy/                 docker-compose.yml, Caddyfile
+deploy/                 compose (base + prod override), web.Dockerfile, Caddyfile,
+                        server-setup.sh / deploy.sh / backup.sh (see docs/deploy.md)
 ```
 
 Each domain package uses **handler -> service -> repo**:
@@ -71,6 +72,16 @@ Each domain package uses **handler -> service -> repo**:
 - Floor plans: SVG, `viewBox="0 0 1000 700"`, no tables drawn. Table `x`/`y` are the
   table centre in percent of plan width/height. Rename the file when a plan changes
   (served with a 30-day cache).
+
+## Production
+
+- One VM, project name `tablebot`, base + `deploy/docker-compose.prod.yml`. Every push to
+  `main` deploys via `.github/workflows/deploy.yml` -> ssh -> `deploy/deploy.sh`, so `main`
+  must always be deployable. Runbook: `docs/deploy.md`.
+- Deploy scripts must stay idempotent, print clear steps, fail loudly; check with
+  `docker run --rm -v "$PWD:/repo" -w /repo koalaman/shellcheck:stable deploy/*.sh` and
+  `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest`.
+- A bot token runs in exactly one place (laptop = dev bot, server = prod bot).
 
 ## Workflow
 
