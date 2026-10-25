@@ -18,7 +18,6 @@ const (
 	CodeNotFound         = "not_found"
 	CodeMethodNotAllowed = "method_not_allowed"
 	CodeInternal         = "internal"
-	CodeNotImplemented   = "not_implemented"
 	CodeUnavailable      = "unavailable"
 
 	CodeTableTaken     = "table_taken"
@@ -62,10 +61,6 @@ func Internal(w http.ResponseWriter) {
 	Error(w, http.StatusInternalServerError, CodeInternal, "internal server error")
 }
 
-func NotImplemented(w http.ResponseWriter) {
-	Error(w, http.StatusNotImplemented, CodeNotImplemented, "not implemented yet")
-}
-
 func NotFound(w http.ResponseWriter, _ *http.Request) {
 	Error(w, http.StatusNotFound, CodeNotFound, "resource not found")
 }
@@ -96,9 +91,4 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 		return errors.New("request body must contain a single JSON object")
 	}
 	return nil
-}
-
-// NotImplementedHandler is a placeholder for routes in the contract that are not built yet.
-func NotImplementedHandler(w http.ResponseWriter, _ *http.Request) {
-	NotImplemented(w)
 }

@@ -110,7 +110,7 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Error(w, http.StatusNotFound, httpx.CodeNotFound, err.Error())
 	case errors.Is(err, ErrTooManyGuests):
 		httpx.Error(w, http.StatusUnprocessableEntity, httpx.CodeTooManyGuests, err.Error())
-	case errors.Is(err, venue.ErrOutsideHours):
+	case errors.Is(err, venue.ErrOutsideHours), errors.Is(err, venue.ErrTooFarAhead):
 		httpx.Error(w, http.StatusUnprocessableEntity, httpx.CodeOutsideHours, err.Error())
 	case errors.Is(err, venue.ErrInPast):
 		httpx.Error(w, http.StatusUnprocessableEntity, httpx.CodeInPast, err.Error())

@@ -3,9 +3,11 @@ package owner_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"testing"
 
+	"github.com/AlikoYe/TableBot/backend/internal/booking"
 	"github.com/AlikoYe/TableBot/backend/internal/owner"
 	"github.com/AlikoYe/TableBot/backend/internal/platform/dbtest"
 )
@@ -13,7 +15,7 @@ import (
 func TestOwnershipChecks(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
-	svc := owner.NewService(owner.NewRepo(db))
+	svc := owner.NewService(owner.NewRepo(db), booking.NewRepo(db), nil, slog.New(slog.DiscardHandler))
 
 	// User 1 owns venue A; user 2 owns nothing; venue C has no owner.
 	var venueA, venueC, tableA, bookingA int64

@@ -36,7 +36,16 @@ type Booking struct {
 	Table          TableRef   `json:"table"`
 	Guest          *Guest     `json:"guest,omitempty"`
 
-	UserID int64 `json:"-"`
+	UserID    int64 `json:"-"`
+	OwnerID   int64 `json:"-"` // venue owner; 0 when the venue has none
+	GuestInfo Guest `json:"-"` // always loaded; exposed via WithGuest
+}
+
+// WithGuest returns the booking with the guest field filled, for owner responses.
+func (b Booking) WithGuest() Booking {
+	g := b.GuestInfo
+	b.Guest = &g
+	return b
 }
 
 type VenueRef struct {
@@ -56,17 +65,11 @@ type Guest struct {
 	Username *string `json:"username"`
 }
 
-// Notifier is told about booking changes after they are committed. Implemented in P4.
+// Notifier is told about booking changes after they are committed. Implemented by bot.Notifier.
 type Notifier interface {
 	BookingCreated(ctx context.Context, b Booking) error
 	BookingCancelled(ctx context.Context, b Booking) error
 }
-
-// NopNotifier does nothing.
-type NopNotifier struct{}
-
-func (NopNotifier) BookingCreated(context.Context, Booking) error   { return nil }
-func (NopNotifier) BookingCancelled(context.Context, Booking) error { return nil }
 
 type CreateInput struct {
 	UserID         int64
