@@ -112,8 +112,10 @@ Each domain package uses **handler -> service -> repo**:
 - **Worker** (`notify.Worker`, every `REMINDER_INTERVAL`): `ExpireAllOverdueSQL` -> tell each
   guest; `ClaimRemindersSQL` (confirmed, not yet reminded, starting within `REMINDER_BEFORE`)
   -> remind each guest. The UPDATE marks rows first, so each guest is told at most once.
-- Notifications (`bot.Notifier`) run after commit. Send failures (e.g. the user never
-  started the bot) are logged at warn with `booking_id` and never fail a request.
+- Notifications (`bot.Notifier`) are triggered after commit and sent in the background:
+  own goroutine, context detached from the request (`context.WithoutCancel`), 10 s timeout.
+  Send failures (e.g. the user never started the bot) are logged at warn with `booking_id`
+  and never fail or slow a request. Tests and shutdown call `Notifier.Wait()`.
 - Venue times: build with `time.Date` in `venue.Location(timezone)`; TIME columns are
   read as minutes since midnight (0..1440, so 24:00 works). `/times`, `/tables` and
   `POST /bookings` accept dates up to `venue.MaxDaysAhead` (30) days ahead.
