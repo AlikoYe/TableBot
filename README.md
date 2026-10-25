@@ -1,11 +1,13 @@
 # TableBot
 
-Telegram Mini App for restaurant table reservations.
+Telegram Mini App for booking a specific table at a venue: restaurants, cafes,
+bars, billiards, karaoke. The guest picks a time and a table on the venue's floor
+plan, the venue owner confirms or rejects, and the database makes double booking
+impossible.
 
-> **Status: skeleton.** Routing, auth, config, DB schema and deploy wiring are
-> in place. Handlers return mock data. Business logic is still TODO. The one
-> exception is Telegram `initData` validation, which is fully implemented and
-> tested.
+> **Status: MVP foundation.** Schema, API contract (`docs/api.yaml`), auth,
+> `/api/me`, floor plans and seed data are done. Venue and booking endpoints are
+> registered but return `501 not_implemented` until they are built.
 
 ## Stack
 
@@ -23,16 +25,20 @@ Prerequisites: Go 1.26+, Node 20.19+ (22 recommended), Docker.
 ```bash
 cp .env.example .env      # APP_ENV=dev by default
 make dev                  # starts Postgres in docker, migrates, runs API + Vite
-make seed                 # optional: makes dev user 1 a staff member
+make seed                 # 3 venues in Almaty owned by dev user 1; user 2 is a customer
+make seed OWNER=123456789 # same, but your own Telegram id owns the venues
 ```
+
+If you ran the old scaffold before (slot/capacity schema), run `make db-reset`
+once: it deletes the local Postgres volume and applies the new migration.
 
 - App: http://localhost:5173 (Vite proxies `/api` to `:8080`)
 - API: http://localhost:8080/api/health
 
 In a normal browser there is no Telegram, so the frontend sends
 `Authorization: dev <VITE_DEV_TELEGRAM_ID>`. The backend accepts this **only**
-when `APP_ENV=dev`. With `make seed`, id `1` is staff and any other id is a
-customer.
+when `APP_ENV=dev`. With `make seed`, id `1` owns all seeded venues and any other
+id is a plain customer. Users are created automatically on their first request.
 
 ### Inside Telegram
 
@@ -60,9 +66,11 @@ Set `SITE_ADDRESS=your.domain` for automatic HTTPS via Caddy.
 |--------|-------------|
 | `make dev` | Postgres (docker) + migrations + API and Vite on the host |
 | `make migrate-up` / `migrate-down` / `migrate-status` | goose migrations (embedded, via `cmd/migrate`) |
-| `make seed` | Load `backend/seed/dev.sql` |
+| `make seed [OWNER=<id>]` | Load `backend/seed/dev.sql` (re-runnable) |
+| `make db-reset` | **Delete** the local Postgres volume, then migrate from scratch |
 | `make build` | `backend/bin/{api,migrate}` + `frontend/dist` |
-| `make test` | `go test -race ./...` |
+| `make test` | `go test -race ./...` (DB tests are skipped) |
+| `make test-db` | All tests including DB integration tests, against `tablebot_test` in the compose Postgres |
 | `make lint` | gofmt check, `go vet`, golangci-lint if installed |
 | `make up` / `down` / `logs` | Full docker stack |
 
@@ -89,18 +97,41 @@ All variables are read from `.env`. See `.env.example`.
 See [`docs/api.yaml`](docs/api.yaml) (OpenAPI 3.1). All routes live under
 `/api`. Errors always look like `{"error": "code", "message": "human text"}`.
 
-| Method | Path | Auth |
-|--------|------|------|
-| GET  | `/api/health` | none |
-| GET  | `/api/me` | user |
-| GET  | `/api/restaurants` | user |
-| GET  | `/api/restaurants/{id}` | user |
-| GET  | `/api/restaurants/{id}/slots?date=YYYY-MM-DD&guests=N` | user |
-| POST | `/api/bookings` | user |
-| GET  | `/api/bookings/my` | user |
-| POST | `/api/bookings/{id}/cancel` | user |
-| GET  | `/api/staff/bookings?date=YYYY-MM-DD` | staff |
-| POST | `/api/staff/bookings/{id}/confirm` | staff |
+| Method | Path | Auth | Status |
+|--------|------|------|--------|
+| GET  | `/api/health` | none | done |
+| GET  | `/api/me` | user | done |
+| GET  | `/api/static/plans/{file}` | none | done |
+| GET  | `/api/venues?category=` | user | 501 |
+| GET  | `/api/venues/{id}` | user | 501 |
+| GET  | `/api/venues/{id}/times?date=YYYY-MM-DD&guests=N` | user | 501 |
+| GET  | `/api/venues/{id}/tables?starts_at=<RFC3339>&guests=N` | user | 501 |
+| POST | `/api/bookings` | user | 501 |
+| GET  | `/api/bookings/my` | user | 501 |
+| POST | `/api/bookings/{id}/cancel` | user | 501 |
+| GET  | `/api/owner/bookings?venue_id=&date=YYYY-MM-DD` | venue owner | 501 |
+| POST | `/api/owner/bookings/{id}/confirm` | venue owner | 501 |
+| POST | `/api/owner/bookings/{id}/reject` | venue owner | 501 |
+
+## For the frontend developer
+
+- **Run the backend:** `cp .env.example .env`, then `make dev` (or `make db-up migrate-up dev-api`
+  for the API alone on `:8080`), then `make seed`. Vite already proxies `/api` to `:8080`.
+- **Auth outside Telegram:** send `Authorization: dev <telegram_id>`. `dev 1` is the owner of
+  all seeded venues, `dev 2` is a customer; any other positive id works as a new customer.
+  Inside Telegram send `Authorization: tma <Telegram.WebApp.initData>`.
+- **Contract:** [`docs/api.yaml`](docs/api.yaml). It lists every endpoint, schema, example and
+  error code. Lists are plain arrays; errors are `{"error": "<code>", "message": "..."}`.
+- **Floor plans:** `floor_plan_url` is an SVG with `viewBox="0 0 1000 700"` (10:7) and no tables
+  drawn. Draw each table centred at `x`% of the width and `y`% of the height.
+- **Not built yet:** everything except `/health`, `/me` and the plan images returns
+  `501 {"error": "not_implemented"}` for now. The request/response shapes in the contract
+  will not change without a note in the PR.
+
+```bash
+curl -H 'Authorization: dev 1' localhost:8080/api/me
+curl -o plan.svg localhost:8080/api/static/plans/nomad-bistro.svg
+```
 
 ## Project structure
 
@@ -109,15 +140,16 @@ backend/
   cmd/api/            main.go (HTTP + bot + reminder worker, graceful shutdown), router.go
   cmd/migrate/        goose runner using the embedded migrations (up|down|status)
   internal/
-    auth/             initData validation, auth middleware, dev bypass, /me
-    restaurant/       handler / service / repo (repo returns mock data)
-    booking/          handler / service / repo (mock)
-    staff/            handler / service / repo (role lookup is real SQL; the rest is mock)
+    auth/             initData validation, middleware (dev bypass, user upsert), /me
+    venue/            venue routes (501 for now)
+    booking/          booking routes (501 for now)
+    owner/            owner routes (501) + per-venue ownership checks
     bot/              go-telegram/bot setup, /start, Notifier interface
-    notify/           reminder worker (ticker only)
-    platform/         config, database (pgxpool), logging (slog), httpx (JSON, errors, middleware)
-  migrations/         0001_init.sql + embed.go
-  seed/dev.sql        dev data
+    notify/           background worker (ticker only)
+    platform/         config, database (pgxpool), dbtest, logging (slog), httpx (JSON, errors, middleware)
+  migrations/         0001_init.sql + embed.go + schema_test.go
+  seed/dev.sql        dev data (3 Almaty venues)
+  static/plans/       floor plan SVGs, embedded into the binary
 frontend/
   src/api/            client.js (fetch wrapper, typed errors) + one module per domain
   src/composables/    useTelegram.js
@@ -134,15 +166,14 @@ docs/api.yaml
 
 ### Schema notes
 
-- `capacity_rules` is a weekly template (weekday, hours, slot length, seats).
-  `time_slots` holds concrete slots generated from it.
-- Overbooking is prevented in the database. `time_slots.booked_guests` has
-  `CHECK (booked_guests <= capacity)` and is updated in the same transaction
-  that inserts or cancels a booking, after `SELECT ... FOR UPDATE` on the slot.
-- `bookings` references `time_slots (id, restaurant_id, starts_at)` with a
-  composite FK, so the denormalised `restaurant_id` and `starts_at` can't drift
-  from the slot.
-- A partial unique index allows one active (`pending` or `confirmed`) booking
-  per user per slot.
-- A partial index on `starts_at WHERE status='confirmed' AND NOT reminder_sent`
-  serves the reminder worker.
+- `users` is keyed by `telegram_id`; `role` is `customer` or `admin`. Being an
+  owner is not a role: a user owns venue X when `venues.owner_id` is their id.
+- `venues` holds opening hours (`opens_at` < `closes_at`, local time in
+  `timezone`, 24:00 allowed), `booking_minutes`, `slot_step_minutes` and
+  `floor_plan_url`. `venue_tables` holds each table's seats and plan position.
+- `bookings.during` is a `tstzrange` `[start, end)`. Two exclusion constraints
+  make double booking impossible for `pending`/`confirmed` rows: one per table
+  (`bookings_no_table_overlap`) and one per user across all venues
+  (`bookings_no_user_overlap`). Both raise SQLSTATE `23P01`.
+- A composite FK `(table_id, venue_id)` guarantees the table belongs to the venue.
+- Pending bookings must have `expires_at`; see `CLAUDE.md` for the full booking rules.
