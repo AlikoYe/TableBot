@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>Medeu Coffee floor plan</title>
+  <rect x="0" y="0" width="1000" height="700" fill="#ffffff"/>
+  <rect x="20" y="20" width="960" height="660" fill="#fbf7f1"/>
+  <!-- Counter with pastry display -->
+  <rect x="600" y="40" width="360" height="80" rx="12" fill="#d9cdb8" stroke="#a8977a" stroke-width="3"/>
+  <text x="730" y="88" text-anchor="middle" font-size="24" fill="#6b5d45" font-weight="600">Counter</text>
+  <rect x="860" y="52" width="86" height="56" rx="8" fill="#f1e6d2" stroke="#a8977a" stroke-width="2"/>
+  <text x="903" y="86" text-anchor="middle" font-size="14" fill="#6b5d45">Pastry</text>
+  <!-- Restroom -->
+  <rect x="20" y="20" width="140" height="120" fill="#efe9e0"/>
+  <path d="M20 140 H90 M140 140 H160 V20" fill="none" stroke="#5a5a5a" stroke-width="6"/>
+  <text x="90" y="88" text-anchor="middle" font-size="22" fill="#8a8273" font-weight="600">WC</text>
+  <!-- Sofa bench -->
+  <rect x="928" y="220" width="36" height="380" rx="10" fill="#c9b9a6" stroke="#a5917b" stroke-width="2"/>
+  <text x="908" y="410" text-anchor="middle" font-size="18" fill="#8a7560" transform="rotate(-90 908 410)">Sofa</text>
+  <!-- Outer walls with entrance gap (x 420-520) -->
+  <path d="M420 680 H20 V20 H980 V680 H520" fill="none" stroke="#3a3a3a" stroke-width="10" stroke-linejoin="round"/>
+  <!-- Street windows -->
+  <g stroke="#8cc4e8" stroke-width="10">
+    <line x1="20" y1="170" x2="20" y2="470"/>
+    <line x1="80" y1="680" x2="360" y2="680"/>
+    <line x1="580" y1="680" x2="860" y2="680"/>
+  </g>
+  <g stroke="#ffffff" stroke-width="2">
+    <line x1="20" y1="170" x2="20" y2="470"/>
+    <line x1="80" y1="680" x2="360" y2="680"/>
+    <line x1="580" y1="680" x2="860" y2="680"/>
+  </g>
+  <!-- Entrance -->
+  <path d="M470 672 V630 M456 644 L470 628 L484 644" fill="none" stroke="#c0763a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="470" y="616" text-anchor="middle" font-size="20" fill="#c0763a" font-weight="600">Entrance</text>
+</svg>
