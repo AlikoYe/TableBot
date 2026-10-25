@@ -81,7 +81,7 @@ build-web: frontend/node_modules
 
 .PHONY: test
 test: ## Run backend unit tests (DB tests are skipped)
-	cd backend && go test -race ./...
+	cd backend && env -u TEST_DATABASE_URL go test -race ./...
 
 .PHONY: test-db
 test-db: db-up ## Run all backend tests, including DB integration tests, against $(TEST_DB)
