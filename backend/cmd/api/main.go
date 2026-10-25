@@ -15,11 +15,11 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/alikhanyedilov/tablebot/backend/internal/bot"
-	"github.com/alikhanyedilov/tablebot/backend/internal/notify"
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/config"
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/database"
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/logging"
+	"github.com/AlikoYe/TableBot/backend/internal/bot"
+	"github.com/AlikoYe/TableBot/backend/internal/notify"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/config"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/database"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/logging"
 )
 
 func main() {
