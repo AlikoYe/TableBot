@@ -82,9 +82,11 @@ func TestTimeRange(t *testing.T) {
 
 func TestBookingCreatedMessagesOwnerWithButtons(t *testing.T) {
 	fs := &fakeSender{}
-	if err := testNotifier(fs, &bytes.Buffer{}).BookingCreated(context.Background(), sampleBooking()); err != nil {
+	n := testNotifier(fs, &bytes.Buffer{})
+	if err := n.BookingCreated(context.Background(), sampleBooking()); err != nil {
 		t.Fatal(err)
 	}
+	n.Wait()
 	if len(fs.sends) != 1 || fs.sends[0].chatID != 1 {
 		t.Fatalf("sends = %+v, want one message to owner 1", fs.sends)
 	}
@@ -114,11 +116,17 @@ func TestGuestAndOwnerMessages(t *testing.T) {
 	confirmed.Status = "confirmed"
 	rejected := b
 	rejected.Status = "rejected"
-	_ = n.BookingDecided(ctx, confirmed)
-	_ = n.BookingDecided(ctx, rejected)
-	_ = n.BookingExpired(ctx, b)
-	_ = n.BookingReminder(ctx, confirmed)
-	_ = n.BookingCancelled(ctx, b)
+	// Wait after each call: background sends may otherwise arrive in any order.
+	for _, send := range []func() error{
+		func() error { return n.BookingDecided(ctx, confirmed) },
+		func() error { return n.BookingDecided(ctx, rejected) },
+		func() error { return n.BookingExpired(ctx, b) },
+		func() error { return n.BookingReminder(ctx, confirmed) },
+		func() error { return n.BookingCancelled(ctx, b) },
+	} {
+		_ = send()
+		n.Wait()
+	}
 
 	want := []struct {
 		chat int64
@@ -140,7 +148,9 @@ func TestNoOwnerMeansNoMessage(t *testing.T) {
 	fs := &fakeSender{}
 	b := sampleBooking()
 	b.OwnerID = 0
-	_ = testNotifier(fs, &bytes.Buffer{}).BookingCreated(context.Background(), b)
+	n := testNotifier(fs, &bytes.Buffer{})
+	_ = n.BookingCreated(context.Background(), b)
+	n.Wait()
 	if len(fs.sends) != 0 {
 		t.Fatalf("sent %d messages for a venue without owner", len(fs.sends))
 	}
@@ -156,9 +166,75 @@ func TestSendErrorsAreSwallowedAndLogged(t *testing.T) {
 	if err := n.BookingDecided(context.Background(), sampleBooking()); err != nil {
 		t.Fatalf("BookingDecided returned %v", err)
 	}
+	n.Wait()
 	out := logs.String()
 	if strings.Count(out, "level=WARN") != 2 || !strings.Contains(out, "booking_id=42") || !strings.Contains(out, "blocked") {
 		t.Fatalf("expected two warn lines with booking_id and the error, got:\n%s", out)
+	}
+}
+
+// blockingSender holds every send until release is closed and records the context it got.
+type blockingSender struct {
+	fakeSender
+	started chan struct{}
+	release chan struct{}
+	ctxErr  chan error
+}
+
+func (s *blockingSender) SendMessage(ctx context.Context, p *tgbot.SendMessageParams) (*models.Message, error) {
+	close(s.started)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+	}
+	err := ctx.Err()
+	s.ctxErr <- err
+	msg, _ := s.fakeSender.SendMessage(ctx, p)
+	return msg, err // like a real client: a dead context is an error
+}
+
+func TestSendsDoNotBlockTheCaller(t *testing.T) {
+	bs := &blockingSender{started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1)}
+	n := testNotifier(bs, &bytes.Buffer{})
+
+	// A request context that is cancelled as soon as the handler returns.
+	ctx, cancel := context.WithCancel(context.Background())
+	returned := make(chan struct{})
+	go func() {
+		_ = n.BookingCreated(ctx, sampleBooking())
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("BookingCreated blocked on a slow Telegram send")
+	}
+	cancel()
+	<-bs.started
+
+	close(bs.release)
+	n.Wait()
+	if err := <-bs.ctxErr; err != nil {
+		t.Fatalf("send context was cancelled with the request: %v", err)
+	}
+	if len(bs.sends) != 1 {
+		t.Fatalf("sends = %d, want 1", len(bs.sends))
+	}
+}
+
+func TestSendTimeoutIsLogged(t *testing.T) {
+	bs := &blockingSender{started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1)}
+	var logs bytes.Buffer
+	n := testNotifier(bs, &logs)
+	n.timeout = 20 * time.Millisecond
+
+	_ = n.BookingDecided(context.Background(), sampleBooking())
+	n.Wait()
+	if err := <-bs.ctxErr; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("send ctx err = %v, want deadline exceeded", err)
+	}
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "booking_id=42") {
+		t.Fatalf("timeout not logged:\n%s", logs.String())
 	}
 }
 

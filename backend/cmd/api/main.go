@@ -97,7 +97,10 @@ func run() error {
 	}
 	g.Go(func() error { return worker.Run(gctx) })
 
-	if err := g.Wait(); err != nil {
+	err = g.Wait()
+	// Let in-flight Telegram sends finish; each is bounded by bot.SendTimeout.
+	notifier.Wait()
+	if err != nil {
 		return err
 	}
 	log.Info("stopped cleanly")

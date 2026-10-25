@@ -21,7 +21,14 @@ import (
 type callbackEnv struct {
 	db  *pgxpool.Pool
 	fs  *fakeSender
+	n   *Notifier
 	bot *Bot
+}
+
+// press runs a callback and waits for the background guest message.
+func (e callbackEnv) press(q *models.CallbackQuery) {
+	e.bot.HandleCallback(context.Background(), q)
+	e.n.Wait()
 }
 
 func newCallbackEnv(t *testing.T) callbackEnv {
@@ -31,7 +38,7 @@ func newCallbackEnv(t *testing.T) callbackEnv {
 	log := slog.New(slog.DiscardHandler)
 	n := testNotifier(fs, &bytes.Buffer{})
 	svc := owner.NewService(owner.NewRepo(db), booking.NewRepo(db), n, log)
-	return callbackEnv{db: db, fs: fs, bot: NewWithSender(fs, svc, "", log)}
+	return callbackEnv{db: db, fs: fs, n: n, bot: NewWithSender(fs, svc, "", log)}
 }
 
 // pendingBooking creates owner 1, guest 2, a venue and a live pending booking tomorrow.
@@ -82,7 +89,7 @@ func TestCallbackOwnerConfirms(t *testing.T) {
 	e := newCallbackEnv(t)
 	id := e.pendingBooking(t)
 
-	e.bot.HandleCallback(context.Background(), press(1, fmt.Sprintf("bk:c:%d", id)))
+	e.press(press(1, fmt.Sprintf("bk:c:%d", id)))
 
 	if got := e.status(t, id); got != "confirmed" {
 		t.Fatalf("status = %s, want confirmed", got)
@@ -98,7 +105,7 @@ func TestCallbackOwnerConfirms(t *testing.T) {
 	}
 
 	// Pressing again: no longer pending.
-	e.bot.HandleCallback(context.Background(), press(1, fmt.Sprintf("bk:r:%d", id)))
+	e.press(press(1, fmt.Sprintf("bk:r:%d", id)))
 	if last := e.fs.answers[len(e.fs.answers)-1]; !last.ShowAlert || last.Text != textNotPending {
 		t.Errorf("second press answer = %+v", last)
 	}
@@ -110,7 +117,7 @@ func TestCallbackOwnerConfirms(t *testing.T) {
 func TestCallbackOwnerRejects(t *testing.T) {
 	e := newCallbackEnv(t)
 	id := e.pendingBooking(t)
-	e.bot.HandleCallback(context.Background(), press(1, fmt.Sprintf("bk:r:%d", id)))
+	e.press(press(1, fmt.Sprintf("bk:r:%d", id)))
 	if got := e.status(t, id); got != "rejected" {
 		t.Fatalf("status = %s, want rejected", got)
 	}
@@ -122,7 +129,7 @@ func TestCallbackOwnerRejects(t *testing.T) {
 func TestCallbackFromNonOwnerIsRefused(t *testing.T) {
 	e := newCallbackEnv(t)
 	id := e.pendingBooking(t)
-	e.bot.HandleCallback(context.Background(), press(2, fmt.Sprintf("bk:c:%d", id)))
+	e.press(press(2, fmt.Sprintf("bk:c:%d", id)))
 
 	if got := e.status(t, id); got != "pending" {
 		t.Fatalf("status = %s, want pending", got)
@@ -140,7 +147,7 @@ func TestCallbackFromNonOwnerIsRefused(t *testing.T) {
 
 func TestCallbackUnknownBooking(t *testing.T) {
 	e := newCallbackEnv(t)
-	e.bot.HandleCallback(context.Background(), press(1, "bk:c:999999"))
+	e.press(press(1, "bk:c:999999"))
 	if len(e.fs.answers) != 1 || e.fs.answers[0].Text != textNotFound {
 		t.Errorf("answers = %+v", e.fs.answers)
 	}

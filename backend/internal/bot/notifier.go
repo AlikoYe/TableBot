@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	tgbot "github.com/go-telegram/bot"
@@ -20,17 +21,27 @@ const (
 	callbackReject  = "bk:r:"
 )
 
-// Notifier sends booking messages through a Sender. Send errors are logged and swallowed,
-// so a blocked bot never fails a request.
+// SendTimeout bounds one background Telegram send.
+const SendTimeout = 10 * time.Second
+
+// Notifier sends booking messages through a Sender in the background, so Telegram latency
+// never slows a request. Send errors are logged and swallowed.
 type Notifier struct {
 	send      Sender
 	webAppURL string
 	log       *slog.Logger
 	now       func() time.Time
+	timeout   time.Duration
+	wg        sync.WaitGroup
 }
 
 func NewNotifier(send Sender, webAppURL string, log *slog.Logger) *Notifier {
-	return &Notifier{send: send, webAppURL: webAppURL, log: log, now: time.Now}
+	return &Notifier{send: send, webAppURL: webAppURL, log: log, now: time.Now, timeout: SendTimeout}
+}
+
+// Wait blocks until every background send has finished (shutdown, tests).
+func (n *Notifier) Wait() {
+	n.wg.Wait()
 }
 
 // BookingCreated asks the venue owner to confirm or reject.
@@ -84,8 +95,16 @@ func (n *Notifier) sendTo(ctx context.Context, b booking.Booking, chatID int64, 
 	if markup != nil {
 		params.ReplyMarkup = markup
 	}
-	if _, err := n.send.SendMessage(ctx, params); err != nil {
-		n.log.WarnContext(ctx, "telegram send failed",
-			slog.String("event", event), slog.Int64("booking_id", b.ID), slog.Int64("chat_id", chatID), slog.Any("err", err))
-	}
+	// Detach from the request: it may finish (and cancel ctx) before Telegram answers.
+	ctx = context.WithoutCancel(ctx)
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		ctx, cancel := context.WithTimeout(ctx, n.timeout)
+		defer cancel()
+		if _, err := n.send.SendMessage(ctx, params); err != nil {
+			n.log.WarnContext(ctx, "telegram send failed",
+				slog.String("event", event), slog.Int64("booking_id", b.ID), slog.Int64("chat_id", chatID), slog.Any("err", err))
+		}
+	}()
 }
