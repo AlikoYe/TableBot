@@ -4,7 +4,15 @@ include .env
 export
 endif
 
-COMPOSE := docker compose -f deploy/docker-compose.yml $(if $(wildcard .env),--env-file .env)
+COMPOSE_PROJECT ?= tablebot
+COMPOSE := docker compose -p $(COMPOSE_PROJECT) -f deploy/docker-compose.yml $(if $(wildcard .env),--env-file .env)
+
+POSTGRES_USER ?= tablebot
+POSTGRES_PASSWORD ?= tablebot
+POSTGRES_PORT ?= 5432
+TEST_DB ?= tablebot_test
+TEST_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(TEST_DB)?sslmode=disable
+OWNER ?= 1
 
 .DEFAULT_GOAL := help
 
@@ -35,8 +43,14 @@ db-up: ## Start only Postgres and wait until it is healthy
 	$(COMPOSE) up -d --wait postgres
 
 .PHONY: seed
-seed: ## Load dev seed data (dev user 1 = staff at restaurant 1)
-	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < backend/seed/dev.sql
+seed: ## Load dev seed data; OWNER=<telegram_id> owns all venues (default 1)
+	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -v owner_id=$(OWNER) -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < backend/seed/dev.sql
+
+.PHONY: db-reset
+db-reset: ## DELETE the local Postgres volume and start fresh (dev data is lost)
+	$(COMPOSE) rm -sf postgres
+	docker volume rm -f $(COMPOSE_PROJECT)_pgdata
+	$(MAKE) --no-print-directory db-up migrate-up
 
 # ---- Migrations ------------------------------------------------------------
 
@@ -66,8 +80,13 @@ build-web: frontend/node_modules
 	cd frontend && npm run build
 
 .PHONY: test
-test: ## Run backend tests
+test: ## Run backend unit tests (DB tests are skipped)
 	cd backend && go test -race ./...
+
+.PHONY: test-db
+test-db: db-up ## Run all backend tests, including DB integration tests, against $(TEST_DB)
+	$(COMPOSE) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '"'"'$(TEST_DB)'"'"'" | grep -q 1 || createdb -U "$$POSTGRES_USER" $(TEST_DB)'
+	cd backend && TEST_DATABASE_URL='$(TEST_DATABASE_URL)' go test -race -count=1 -p 1 ./...
 
 .PHONY: lint
 lint: ## gofmt check + go vet (+ golangci-lint if installed)

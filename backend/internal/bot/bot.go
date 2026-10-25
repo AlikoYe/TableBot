@@ -58,7 +58,7 @@ func (b *Bot) Notify(ctx context.Context, telegramID int64, text string) error {
 func (b *Bot) handleStart(ctx context.Context, api *tgbot.Bot, update *models.Update) {
 	params := &tgbot.SendMessageParams{
 		ChatID: update.Message.Chat.ID,
-		Text:   "Welcome to TableBot! Book a table at your favourite restaurant in a few taps.",
+		Text:   "Welcome to TableBot! Book a table at restaurants, cafes, billiards and more in a few taps.",
 	}
 	if b.webAppURL != "" {
 		params.ReplyMarkup = &models.InlineKeyboardMarkup{

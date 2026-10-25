@@ -10,17 +10,24 @@ import (
 	"net/http"
 )
 
-// Error codes used in the "error" field of ErrorResponse.
+// Error codes used in the "error" field of ErrorResponse. Keep in sync with docs/api.yaml.
 const (
 	CodeBadRequest       = "bad_request"
 	CodeUnauthorized     = "unauthorized"
 	CodeForbidden        = "forbidden"
 	CodeNotFound         = "not_found"
 	CodeMethodNotAllowed = "method_not_allowed"
-	CodeConflict         = "conflict"
 	CodeInternal         = "internal"
 	CodeNotImplemented   = "not_implemented"
 	CodeUnavailable      = "unavailable"
+
+	CodeTableTaken     = "table_taken"
+	CodeUserBusy       = "user_busy"
+	CodeTooManyGuests  = "too_many_guests"
+	CodeOutsideHours   = "outside_hours"
+	CodeInPast         = "in_past"
+	CodeNotPending     = "not_pending"
+	CodeNotCancellable = "not_cancellable"
 )
 
 const maxBodyBytes = 1 << 20 // 1 MiB
@@ -90,4 +97,9 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 		return errors.New("request body must contain a single JSON object")
 	}
 	return nil
+}
+
+// NotImplementedHandler is a placeholder for routes in the contract that are not built yet.
+func NotImplementedHandler(w http.ResponseWriter, _ *http.Request) {
+	NotImplemented(w)
 }

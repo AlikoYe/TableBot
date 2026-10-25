@@ -10,19 +10,18 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alikhanyedilov/tablebot/backend/internal/auth"
-	"github.com/alikhanyedilov/tablebot/backend/internal/booking"
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/config"
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/httpx"
-	"github.com/alikhanyedilov/tablebot/backend/internal/restaurant"
-	"github.com/alikhanyedilov/tablebot/backend/internal/staff"
+	"github.com/AlikoYe/TableBot/backend/internal/auth"
+	"github.com/AlikoYe/TableBot/backend/internal/booking"
+	"github.com/AlikoYe/TableBot/backend/internal/owner"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/config"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/httpx"
+	"github.com/AlikoYe/TableBot/backend/internal/venue"
+	"github.com/AlikoYe/TableBot/backend/static"
 )
 
 func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Handler {
-	restaurants := restaurant.NewHandler(restaurant.NewService(restaurant.NewRepo(pool)), log)
-	bookings := booking.NewHandler(booking.NewService(booking.NewRepo(pool)), log)
-	staffSvc := staff.NewService(staff.NewRepo(pool))
-	staffHandler := staff.NewHandler(staffSvc, log)
+	ownerSvc := owner.NewService(owner.NewRepo(pool))
+	ownerHandler := owner.NewHandler(ownerSvc, log)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -33,18 +32,20 @@ func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Han
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", healthHandler(pool))
+		r.Get("/static/plans/{file}", static.PlanHandler)
 
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware(auth.Options{
 				BotToken: cfg.BotToken,
 				AppEnv:   cfg.AppEnv,
+				Users:    auth.NewUserRepo(pool),
 				Logger:   log,
 			}))
 
-			r.Get("/me", auth.MeHandler(staffSvc, log))
-			r.Route("/restaurants", restaurants.Routes)
-			r.Route("/bookings", bookings.Routes)
-			r.Route("/staff", staffHandler.Routes)
+			r.Get("/me", auth.MeHandler(ownerSvc, log))
+			r.Route("/venues", venue.Routes)
+			r.Route("/bookings", booking.Routes)
+			r.Route("/owner", ownerHandler.Routes)
 		})
 	})
 	return r

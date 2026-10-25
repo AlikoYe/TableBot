@@ -1,16 +1,67 @@
 openapi: 3.1.0
 info:
   title: TableBot API
-  version: 0.1.0
+  version: 2.0.0
   description: |
-    Backend for the TableBot Telegram Mini App.
+    Backend for the TableBot Telegram Mini App. Users pick a venue (restaurant,
+    cafe, billiards, ...), a start time and a specific table on the venue's floor
+    plan. The venue owner confirms or rejects the request.
 
-    Every endpoint except `/health` requires
-    `Authorization: tma <initData>` (the raw `Telegram.WebApp.initData`).
+    ## Auth
+    Every endpoint except `/health` and `/static/plans/{file}` requires
+    `Authorization: tma <initData>` (the raw `Telegram.WebApp.initData` string).
     When the server runs with `APP_ENV=dev`, `Authorization: dev <telegram_id>`
-    is also accepted.
+    is also accepted (e.g. `dev 1` is the seeded owner, `dev 2` a customer).
 
-    Errors always use the `Error` schema.
+    ## Conventions
+    - All timestamps are RFC 3339 with an offset. Times that belong to a venue
+      are returned in the venue's own time zone (`Venue.timezone`), e.g.
+      `2026-10-27T19:00:00+05:00` for Almaty. Clients may send any offset.
+    - `date` query parameters (`YYYY-MM-DD`) are the venue's local calendar date.
+    - Lists are plain JSON arrays.
+    - Errors always use the `Error` schema: `{"error": "<code>", "message": "<text>"}`.
+      Switch on `error`; `message` is for humans and may change.
+
+    ## Floor plans
+    `Venue.floor_plan_url` points to an SVG served by this API. Every plan uses
+    `viewBox="0 0 1000 700"`, i.e. a **10:7 aspect ratio**. Plans show walls,
+    entrance, bar/counter etc. but **no tables**; the client draws tables on top.
+    `Table.x` and `Table.y` are the **centre** of the table as a **percent
+    (0-100) of the plan width and height**, measured from the top-left corner.
+    So a table with `x: 50, y: 20` is centred at (500, 140) in plan units.
+
+    ## Booking lifecycle
+    `pending` -> `confirmed` (owner confirms) | `rejected` (owner rejects) |
+    `expired` (nobody decided before `expires_at`, 15 minutes after creation) |
+    `cancelled` (the guest cancels). `confirmed` -> `cancelled` (the guest cancels).
+    Only `pending` and `confirmed` bookings hold a table.
+
+    ## Status of this contract
+    Implemented: `/health`, `/me`, `/static/plans/{file}`. Every other endpoint
+    currently returns `501 not_implemented` and will be built against this spec.
+
+    ## Error codes
+    | code | HTTP | when |
+    |------|------|------|
+    | `bad_request` | 400 | Malformed JSON, unknown fields, missing or invalid parameters (bad date, guests outside 1-20, special_request over 300 chars, non-numeric id). |
+    | `unauthorized` | 401 | Missing, malformed, expired or badly signed `Authorization` header. |
+    | `forbidden` | 403 | Owner endpoint for a venue the current user does not own. |
+    | `not_found` | 404 | Venue, table or booking does not exist, is inactive, or (for `/bookings/{id}/cancel`) belongs to another user. Unknown routes and plan files. |
+    | `method_not_allowed` | 405 | Wrong HTTP method for an existing path. |
+    | `table_taken` | 409 | `POST /bookings`: the table already has a pending or confirmed booking overlapping this time. |
+    | `user_busy` | 409 | `POST /bookings`: the user already has a pending or confirmed booking (at any venue) overlapping this time. |
+    | `not_pending` | 409 | Owner confirm/reject of a booking that is not `pending` (already decided, cancelled or expired, including pending bookings past `expires_at`). |
+    | `not_cancellable` | 409 | Guest cancel of a booking that is not `pending`/`confirmed`, or that has already started. |
+    | `too_many_guests` | 422 | `POST /bookings`: `guests` is more than the table's `seats`. |
+    | `outside_hours` | 422 | `starts_at` is not on the venue's slot grid (`opens_at` + n x `slot_step_minutes`), or the booking would end after `closes_at`. |
+    | `in_past` | 422 | `starts_at` is not in the future. |
+    | `not_implemented` | 501 | Endpoint is in the contract but not built yet. |
+    | `internal` | 500 | Unexpected server error. |
+    | `unavailable` | 503 | `/health`: the database is unreachable. |
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+
 servers:
   - url: /api
 
@@ -19,15 +70,22 @@ security:
 
 tags:
   - name: system
-  - name: restaurants
+    description: Health check and the current user.
+  - name: venues
+    description: Browse venues, free start times and the table map.
   - name: bookings
-  - name: staff
+    description: The current user's own bookings.
+  - name: owner
+    description: Venue owners deciding on bookings. Access is per venue (venues.owner_id), not a role.
+  - name: static
+    description: Floor plan images.
 
 paths:
   /health:
     get:
       tags: [system]
-      summary: Liveness + database check
+      operationId: getHealth
+      summary: Liveness and database check
       security: []
       responses:
         "200":
@@ -36,94 +94,141 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [status]
                 properties:
                   status: { type: string, const: ok }
-        "503":
-          $ref: "#/components/responses/Error"
+              example: { status: ok }
+        "503": { $ref: "#/components/responses/Unavailable" }
 
   /me:
     get:
       tags: [system]
-      summary: Current user and role
+      operationId: getMe
+      summary: Current user, role and owned venues
+      description: |
+        The user row is created or refreshed (name, username) on every
+        authenticated request, so this always succeeds for a valid header.
+        `is_owner` is true when the user owns at least one venue; use
+        `owned_venue_ids` to decide which owner screens to show.
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Me" }
-        "401": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
-  /restaurants:
+  /venues:
     get:
-      tags: [restaurants]
-      summary: List restaurants
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items: { $ref: "#/components/schemas/Restaurant" }
-        "401": { $ref: "#/components/responses/Error" }
-
-  /restaurants/{id}:
-    parameters:
-      - $ref: "#/components/parameters/Id"
-    get:
-      tags: [restaurants]
-      summary: Get a restaurant
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Restaurant" }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-
-  /restaurants/{id}/slots:
-    parameters:
-      - $ref: "#/components/parameters/Id"
-    get:
-      tags: [restaurants]
-      summary: Available time slots for a date and party size
+      tags: [venues]
+      operationId: listVenues
+      summary: List active venues
       parameters:
-        - name: date
+        - name: category
           in: query
-          required: true
-          schema: { type: string, format: date, examples: ["2026-10-01"] }
-        - name: guests
-          in: query
-          required: true
-          schema: { type: integer, minimum: 1, maximum: 20 }
+          required: false
+          description: Only venues of this category.
+          schema: { $ref: "#/components/schemas/Category" }
+      responses:
+        "200":
+          description: Active venues ordered by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Venue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /venues/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [venues]
+      operationId: getVenue
+      summary: Get one venue
       responses:
         "200":
           description: OK
           content:
             application/json:
+              schema: { $ref: "#/components/schemas/Venue" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /venues/{id}/times:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [venues]
+      operationId: listVenueTimes
+      summary: Start times on a date and how many tables are free at each
+      description: |
+        Start times are `opens_at`, `opens_at + slot_step_minutes`, ... on the
+        venue-local `date`, keeping only those where the booking
+        (`booking_minutes` long) ends by `closes_at` and the start is in the
+        future. `free_tables` counts active tables with `seats >= guests` and no
+        pending/confirmed booking overlapping `[starts_at, ends_at)`.
+        Times with `free_tables: 0` are included so the UI can show them disabled.
+        A past date returns an empty array.
+      parameters:
+        - $ref: "#/components/parameters/Date"
+        - $ref: "#/components/parameters/Guests"
+      responses:
+        "200":
+          description: Ordered by `starts_at`.
+          content:
+            application/json:
               schema:
-                type: object
-                required: [date, guests, items]
-                properties:
-                  date: { type: string, format: date }
-                  guests: { type: integer }
-                  items:
-                    type: array
-                    items: { $ref: "#/components/schemas/Slot" }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
+                type: array
+                items: { $ref: "#/components/schemas/TimeOption" }
+              example:
+                - { starts_at: "2026-10-27T18:00:00+05:00", ends_at: "2026-10-27T20:00:00+05:00", free_tables: 3 }
+                - { starts_at: "2026-10-27T18:30:00+05:00", ends_at: "2026-10-27T20:30:00+05:00", free_tables: 0 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /venues/{id}/tables:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [venues]
+      operationId: listVenueTables
+      summary: Floor plan and every active table with its status for a start time
+      parameters:
+        - name: starts_at
+          in: query
+          required: true
+          description: A start time from `/venues/{id}/times` (RFC 3339, any offset; `+` must be URL-encoded as `%2B`).
+          schema: { type: string, format: date-time }
+          example: "2026-10-27T19:00:00+05:00"
+        - $ref: "#/components/parameters/Guests"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TableMap" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /bookings:
     post:
       tags: [bookings]
-      summary: Create a booking
+      operationId: createBooking
+      summary: Request a table
+      description: |
+        Creates a `pending` booking for `[starts_at, starts_at + booking_minutes)`
+        that expires 15 minutes later unless the owner confirms or rejects it.
+        The venue is the table's venue. The owner is notified in Telegram.
       requestBody:
         required: true
         content:
@@ -135,90 +240,160 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Booking" }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-        "409":
-          description: Slot is full
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/BookingConflict" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /bookings/my:
     get:
       tags: [bookings]
-      summary: The current user's bookings
+      operationId: listMyBookings
+      summary: The current user's bookings, newest first
+      description: All statuses, ordered by `starts_at` descending.
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items: { $ref: "#/components/schemas/Booking" }
-        "401": { $ref: "#/components/responses/Error" }
+                type: array
+                items: { $ref: "#/components/schemas/Booking" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /bookings/{id}/cancel:
     parameters:
       - $ref: "#/components/parameters/Id"
     post:
       tags: [bookings]
-      summary: Cancel one of the current user's bookings
+      operationId: cancelBooking
+      summary: Cancel your own pending or confirmed booking
       responses:
         "200":
-          description: OK
+          description: The booking, now `cancelled`.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Booking" }
-        "401": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/StateConflict" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
-  /staff/bookings:
+  /owner/bookings:
     get:
-      tags: [staff]
-      summary: Bookings at the staff member's restaurants for a date
+      tags: [owner]
+      operationId: listOwnerBookings
+      summary: Bookings at a venue you own on a local date
+      description: All statuses starting on the venue-local `date`, ordered by `starts_at`. Includes `guest`.
       parameters:
-        - name: date
+        - name: venue_id
           in: query
           required: true
-          schema: { type: string, format: date }
+          schema: { type: integer, format: int64, minimum: 1 }
+          example: 1
+        - $ref: "#/components/parameters/Date"
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                type: object
-                required: [date, items]
-                properties:
-                  date: { type: string, format: date }
-                  items:
-                    type: array
-                    items: { $ref: "#/components/schemas/StaffBooking" }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
+                type: array
+                items: { $ref: "#/components/schemas/Booking" }
+              example:
+                - id: 42
+                  status: pending
+                  guests: 4
+                  starts_at: "2026-10-27T19:00:00+05:00"
+                  ends_at: "2026-10-27T21:00:00+05:00"
+                  expires_at: "2026-10-25T18:15:00+05:00"
+                  special_request: "Birthday, please bring a candle"
+                  created_at: "2026-10-25T18:00:00+05:00"
+                  venue: { id: 1, name: Nomad Bistro }
+                  table: { id: 3, label: T3, seats: 4 }
+                  guest: { name: Aigerim S., username: aigerim_s }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
 
-  /staff/bookings/{id}/confirm:
+  /owner/bookings/{id}/confirm:
     parameters:
       - $ref: "#/components/parameters/Id"
     post:
-      tags: [staff]
-      summary: Confirm a pending booking
+      tags: [owner]
+      operationId: confirmBooking
+      summary: Confirm a pending booking at your venue
+      description: The guest is notified in Telegram.
       responses:
         "200":
-          description: OK
+          description: The booking, now `confirmed`. Includes `guest`.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/StaffBooking" }
-        "401": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
+              schema: { $ref: "#/components/schemas/Booking" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/StateConflict" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /owner/bookings/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [owner]
+      operationId: rejectBooking
+      summary: Reject a pending booking at your venue
+      description: The guest is notified in Telegram. The table becomes free again.
+      responses:
+        "200":
+          description: The booking, now `rejected`. Includes `guest`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/StateConflict" }
+        "501": { $ref: "#/components/responses/NotImplemented" }
+
+  /static/plans/{file}:
+    get:
+      tags: [static]
+      operationId: getFloorPlan
+      summary: Floor plan SVG
+      description: |
+        No auth, so it can be used directly in `<img src>` or `<image href>`.
+        `viewBox="0 0 1000 700"` (10:7). Cached for 30 days with an `ETag`.
+      security: []
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_.-]+\.svg$' }
+          example: nomad-bistro.svg
+      responses:
+        "200":
+          description: The SVG image.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              example: "public, max-age=2592000"
+            ETag:
+              schema: { type: string }
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        "304":
+          description: Not modified (`If-None-Match` matched the `ETag`).
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:
@@ -226,7 +401,9 @@ components:
       type: apiKey
       in: header
       name: Authorization
-      description: '"tma <initData>", or "dev <telegram_id>" when APP_ENV=dev.'
+      description: |
+        `tma <initData>` with the raw `Telegram.WebApp.initData` string.
+        Only when the server runs with `APP_ENV=dev`: `dev <telegram_id>`.
 
   parameters:
     Id:
@@ -234,13 +411,91 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64, minimum: 1 }
+      example: 1
+    Date:
+      name: date
+      in: query
+      required: true
+      description: Venue-local calendar date.
+      schema: { type: string, format: date }
+      example: "2026-10-27"
+    Guests:
+      name: guests
+      in: query
+      required: true
+      description: Party size.
+      schema: { type: integer, minimum: 1, maximum: 20 }
+      example: 4
 
   responses:
-    Error:
-      description: Error
+    BadRequest:
+      description: "`bad_request`"
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+          example: { error: bad_request, message: "query parameter \"guests\" must be an integer between 1 and 20" }
+    Unauthorized:
+      description: "`unauthorized`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: unauthorized, message: "missing or malformed Authorization header" }
+    Forbidden:
+      description: "`forbidden`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: forbidden, message: "you are not the owner of this venue" }
+    NotFound:
+      description: "`not_found`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: not_found, message: "resource not found" }
+    BookingConflict:
+      description: "`table_taken` or `user_busy`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            table_taken:
+              value: { error: table_taken, message: "this table is already booked for that time" }
+            user_busy:
+              value: { error: user_busy, message: "you already have a booking at that time" }
+    StateConflict:
+      description: "`not_pending` (owner confirm/reject) or `not_cancellable` (guest cancel)"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            not_pending:
+              value: { error: not_pending, message: "booking is no longer pending" }
+            not_cancellable:
+              value: { error: not_cancellable, message: "booking can no longer be cancelled" }
+    Unprocessable:
+      description: "`too_many_guests` (POST /bookings only), `outside_hours` or `in_past`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            too_many_guests:
+              value: { error: too_many_guests, message: "table T1 seats 2 guests" }
+            outside_hours:
+              value: { error: outside_hours, message: "start time is outside opening hours" }
+            in_past:
+              value: { error: in_past, message: "start time must be in the future" }
+    NotImplemented:
+      description: "`not_implemented`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: not_implemented, message: "not implemented yet" }
+    Unavailable:
+      description: "`unavailable`"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: unavailable, message: "database is unreachable" }
 
   schemas:
     Error:
@@ -249,83 +504,188 @@ components:
       properties:
         error:
           type: string
-          description: Machine-readable code.
-          enum: [bad_request, unauthorized, forbidden, not_found, method_not_allowed, conflict, internal, not_implemented, unavailable]
-        message:
-          type: string
-          description: Human-readable explanation.
-
-    User:
-      type: object
-      required: [id, first_name]
-      properties:
-        id: { type: integer, format: int64, description: Telegram user id }
-        first_name: { type: string }
-        last_name: { type: string }
-        username: { type: string }
-        language_code: { type: string }
-        is_premium: { type: boolean }
-        photo_url: { type: string }
+          enum:
+            - bad_request
+            - unauthorized
+            - forbidden
+            - not_found
+            - method_not_allowed
+            - table_taken
+            - user_busy
+            - too_many_guests
+            - outside_hours
+            - in_past
+            - not_pending
+            - not_cancellable
+            - not_implemented
+            - internal
+            - unavailable
+        message: { type: string }
+      example: { error: table_taken, message: "this table is already booked for that time" }
 
     Me:
       type: object
-      required: [user, role]
+      required: [telegram_id, name, username, role, is_owner, owned_venue_ids]
       properties:
-        user: { $ref: "#/components/schemas/User" }
-        role: { type: string, enum: [customer, staff, admin] }
+        telegram_id: { type: integer, format: int64 }
+        name: { type: string, description: "First and last name from Telegram." }
+        username: { type: [string, "null"], description: "Telegram username without @, or null." }
+        role: { type: string, enum: [customer, admin] }
+        is_owner: { type: boolean, description: "True when owned_venue_ids is not empty." }
+        owned_venue_ids:
+          type: array
+          items: { type: integer, format: int64 }
+      example:
+        telegram_id: 1
+        name: Dev 1
+        username: dev_1
+        role: customer
+        is_owner: true
+        owned_venue_ids: [1, 2, 3]
 
-    Restaurant:
+    Category:
+      type: string
+      enum: [restaurant, cafe, bar, billiards, karaoke, other]
+
+    Venue:
       type: object
-      required: [id, name, address, description, timezone]
+      required: [id, name, category, address, description, timezone, opens_at, closes_at,
+                 booking_minutes, slot_step_minutes, floor_plan_url]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
+        category: { $ref: "#/components/schemas/Category" }
         address: { type: string }
         description: { type: string }
-        timezone: { type: string, examples: [Asia/Almaty] }
+        timezone: { type: string, description: "IANA zone; all venue times are local to it." }
+        opens_at: { type: string, pattern: '^\d{2}:\d{2}$', description: "Local HH:MM." }
+        closes_at: { type: string, pattern: '^\d{2}:\d{2}$', description: "Local HH:MM; may be 24:00. Always later than opens_at (no overnight hours)." }
+        booking_minutes: { type: integer, minimum: 1, description: "How long every booking lasts." }
+        slot_step_minutes: { type: integer, minimum: 1, description: "Start times are opens_at + n x slot_step_minutes." }
+        floor_plan_url:
+          type: string
+          description: "Path of the plan SVG (viewBox 0 0 1000 700). Empty string when the venue has no plan."
+      example:
+        id: 1
+        name: Nomad Bistro
+        category: restaurant
+        address: Abay Ave 52, Almaty
+        description: Modern Kazakh and Central Asian cuisine.
+        timezone: Asia/Almaty
+        opens_at: "12:00"
+        closes_at: "24:00"
+        booking_minutes: 120
+        slot_step_minutes: 30
+        floor_plan_url: /api/static/plans/nomad-bistro.svg
 
-    Slot:
+    TimeOption:
       type: object
-      required: [starts_at, available]
+      required: [starts_at, ends_at, free_tables]
       properties:
         starts_at: { type: string, format: date-time }
-        available: { type: integer, description: Guests that can still be seated }
+        ends_at: { type: string, format: date-time, description: "starts_at + booking_minutes." }
+        free_tables: { type: integer, minimum: 0 }
+      example: { starts_at: "2026-10-27T19:00:00+05:00", ends_at: "2026-10-27T21:00:00+05:00", free_tables: 2 }
 
-    BookingStatus:
-      type: string
-      enum: [pending, confirmed, cancelled, completed, no_show]
+    Table:
+      type: object
+      required: [id, label, seats, x, y, shape, status]
+      properties:
+        id: { type: integer, format: int64 }
+        label: { type: string, description: "Short name shown on the plan, e.g. T1." }
+        seats: { type: integer, minimum: 1, maximum: 20 }
+        x: { type: number, minimum: 0, maximum: 100, description: "Centre, percent of plan width from the left." }
+        y: { type: number, minimum: 0, maximum: 100, description: "Centre, percent of plan height from the top." }
+        shape: { type: string, enum: [round, rect] }
+        status:
+          type: string
+          enum: [free, taken, too_small]
+          description: |
+            `taken`: a pending or confirmed booking overlaps the requested time.
+            `too_small`: seats < guests (checked first, so a small busy table is `too_small`).
+            `free`: can be booked.
+      example: { id: 3, label: T3, seats: 4, x: 32, y: 20, shape: round, status: free }
+
+    TableMap:
+      type: object
+      required: [venue_id, starts_at, ends_at, floor_plan_url, tables]
+      properties:
+        venue_id: { type: integer, format: int64 }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        floor_plan_url: { type: string }
+        tables:
+          type: array
+          items: { $ref: "#/components/schemas/Table" }
+      example:
+        venue_id: 1
+        starts_at: "2026-10-27T19:00:00+05:00"
+        ends_at: "2026-10-27T21:00:00+05:00"
+        floor_plan_url: /api/static/plans/nomad-bistro.svg
+        tables:
+          - { id: 1, label: T1, seats: 2, x: 13, y: 18, shape: round, status: too_small }
+          - { id: 3, label: T3, seats: 4, x: 32, y: 20, shape: round, status: taken }
+          - { id: 4, label: T4, seats: 4, x: 50, y: 20, shape: round, status: free }
+          - { id: 6, label: T6, seats: 6, x: 32, y: 52, shape: rect, status: free }
 
     CreateBookingRequest:
       type: object
-      required: [restaurant_id, starts_at, guests]
+      required: [table_id, starts_at, guests]
       additionalProperties: false
       properties:
-        restaurant_id: { type: integer, format: int64 }
-        starts_at: { type: string, format: date-time }
-        guests: { type: integer, minimum: 1, maximum: 20 }
-        special_request: { type: string, maxLength: 500 }
+        table_id: { type: integer, format: int64, minimum: 1 }
+        starts_at: { type: string, format: date-time, description: "A start time from /venues/{id}/times." }
+        guests: { type: integer, minimum: 1, maximum: 20, description: "Must be <= the table's seats." }
+        special_request: { type: string, maxLength: 300, default: "" }
+      example:
+        table_id: 4
+        starts_at: "2026-10-27T19:00:00+05:00"
+        guests: 4
+        special_request: "Birthday, please bring a candle"
 
     Booking:
       type: object
-      required: [id, restaurant_id, restaurant_name, starts_at, guests, status, special_request, created_at]
+      required: [id, status, guests, starts_at, ends_at, expires_at, special_request, created_at, venue, table]
       properties:
         id: { type: integer, format: int64 }
-        restaurant_id: { type: integer, format: int64 }
-        restaurant_name: { type: string }
+        status: { type: string, enum: [pending, confirmed, rejected, cancelled, expired] }
+        guests: { type: integer, minimum: 1, maximum: 20 }
         starts_at: { type: string, format: date-time }
-        guests: { type: integer }
-        status: { $ref: "#/components/schemas/BookingStatus" }
+        ends_at: { type: string, format: date-time }
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: "When a pending booking expires if nobody decides. Non-null while pending; may stay set afterwards — only meaningful when status is pending."
         special_request: { type: string }
         created_at: { type: string, format: date-time }
-
-    StaffBooking:
-      type: object
-      required: [id, restaurant_id, starts_at, guests, status, special_request, customer_name]
-      properties:
-        id: { type: integer, format: int64 }
-        restaurant_id: { type: integer, format: int64 }
-        starts_at: { type: string, format: date-time }
-        guests: { type: integer }
-        status: { $ref: "#/components/schemas/BookingStatus" }
-        special_request: { type: string }
-        customer_name: { type: string }
+        venue:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string }
+        table:
+          type: object
+          required: [id, label, seats]
+          properties:
+            id: { type: integer, format: int64 }
+            label: { type: string }
+            seats: { type: integer }
+        guest:
+          type: object
+          description: Only in /owner/* responses.
+          required: [name, username]
+          properties:
+            name: { type: string }
+            username: { type: [string, "null"] }
+      example:
+        id: 42
+        status: pending
+        guests: 4
+        starts_at: "2026-10-27T19:00:00+05:00"
+        ends_at: "2026-10-27T21:00:00+05:00"
+        expires_at: "2026-10-25T18:15:00+05:00"
+        special_request: "Birthday, please bring a candle"
+        created_at: "2026-10-25T18:00:00+05:00"
+        venue: { id: 1, name: Nomad Bistro }
+        table: { id: 4, label: T4, seats: 4 }
