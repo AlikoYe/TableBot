@@ -5,9 +5,9 @@ bars, billiards, karaoke. The guest picks a time and a table on the venue's floo
 plan, the venue owner confirms or rejects, and the database makes double booking
 impossible.
 
-> **Status: MVP in progress.** Schema, API contract (`docs/api.yaml`), auth,
-> `/api/me`, floor plans, seed data and the diner side (`/venues/*`, `/bookings/*`)
-> are done. Owner endpoints (`/owner/*`) return `501 not_implemented` for now.
+> **Status: MVP feature-complete on the backend.** Every endpoint in
+> `docs/api.yaml` is implemented, plus Telegram notifications (with confirm/reject
+> buttons for owners) and a worker that expires unanswered requests and sends reminders.
 
 ## Stack
 
@@ -46,9 +46,11 @@ id is a plain customer. Users are created automatically on their first request.
 2. Expose Vite over HTTPS, e.g. `cloudflared tunnel --url http://localhost:5173`
    or `ngrok http 5173`. `*.trycloudflare.com` and `*.ngrok-free.app` are
    already allowed in `vite.config.js`.
-3. Set `WEBAPP_URL` to the tunnel URL and restart `make dev`. Send `/start`
-   to the bot and tap **Book a table**. You can also set the URL as the bot's
-   menu button in BotFather.
+3. Set `WEBAPP_URL` to the tunnel URL and restart `make dev`. On startup the
+   API sets the bot's menu button to **Open TableBot**. Send `/start` and tap
+   **Open TableBot**.
+4. To receive owner notifications, run `make seed OWNER=<your telegram id>` and
+   press **Start** in the bot once (Telegram only lets bots message users who did).
 
 ### Full stack in Docker
 
@@ -87,7 +89,8 @@ All variables are read from `.env`. See `.env.example`.
 | `BOT_TOKEN` | (required outside dev) | Bot token. It is also the key used to validate `initData`. When empty in dev, the bot is disabled. |
 | `WEBAPP_URL` | (empty) | HTTPS URL for the `/start` button |
 | `HOLD_MINUTES` | `15` | How long a pending booking waits for the owner before it expires |
-| `REMINDER_INTERVAL` | `1m` | Reminder worker tick |
+| `REMINDER_INTERVAL` | `1m` | Worker tick (expire overdue holds, send reminders) |
+| `REMINDER_BEFORE` | `2h` | How long before the start a confirmed guest gets a reminder |
 | `SHUTDOWN_TIMEOUT` | `10s` | Graceful HTTP shutdown timeout |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_PORT` | `tablebot` / `tablebot` / `tablebot` / `5432` | Compose Postgres |
 | `SITE_ADDRESS` | `:80` | Caddy site address |
@@ -110,9 +113,9 @@ See [`docs/api.yaml`](docs/api.yaml) (OpenAPI 3.1). All routes live under
 | POST | `/api/bookings` | user | done |
 | GET  | `/api/bookings/my` | user | done |
 | POST | `/api/bookings/{id}/cancel` | user | done |
-| GET  | `/api/owner/bookings?venue_id=&date=YYYY-MM-DD` | venue owner | 501 |
-| POST | `/api/owner/bookings/{id}/confirm` | venue owner | 501 |
-| POST | `/api/owner/bookings/{id}/reject` | venue owner | 501 |
+| GET  | `/api/owner/bookings?venue_id=&date=YYYY-MM-DD` | venue owner | done |
+| POST | `/api/owner/bookings/{id}/confirm` | venue owner | done |
+| POST | `/api/owner/bookings/{id}/reject` | venue owner | done |
 
 ## For the frontend developer
 
@@ -125,9 +128,10 @@ See [`docs/api.yaml`](docs/api.yaml) (OpenAPI 3.1). All routes live under
   error code. Lists are plain arrays; errors are `{"error": "<code>", "message": "..."}`.
 - **Floor plans:** `floor_plan_url` is an SVG with `viewBox="0 0 1000 700"` (10:7) and no tables
   drawn. Draw each table centred at `x`% of the width and `y`% of the height.
-- **Not built yet:** the `/owner/*` endpoints return `501 {"error": "not_implemented"}`
-  for now. The request/response shapes in the contract will not change without a note
-  in the PR.
+- **All endpoints are implemented.** The request/response shapes in the contract will
+  not change without a note in the PR.
+- **Without a bot token** (`BOT_TOKEN` empty), the backend logs every Telegram message it
+  would send (`telegram disabled, would send ...`), so you can follow the flow in the API logs.
 
 ```bash
 curl -H 'Authorization: dev 1' localhost:8080/api/me
@@ -145,9 +149,9 @@ backend/
     bookingstatus/    shared "blocking" / effective-status SQL
     venue/            venues, schedule grid, free times, table map
     booking/          create / my / cancel, Notifier hook
-    owner/            owner routes (501) + per-venue ownership checks
-    bot/              go-telegram/bot setup, /start, Notifier interface
-    notify/           background worker (ticker only)
+    owner/            owner list, confirm/reject (shared with the bot), per-venue checks
+    bot/              Telegram: /start, menu button, notifications, confirm/reject buttons; texts.go
+    notify/           worker: expire unanswered requests, send reminders
     platform/         config, database (pgxpool), dbtest, logging (slog), httpx (JSON, errors, middleware)
   migrations/         0001_init.sql + embed.go + schema_test.go
   seed/dev.sql        dev data (3 Almaty venues)

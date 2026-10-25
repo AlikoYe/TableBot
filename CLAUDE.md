@@ -19,9 +19,10 @@ backend/
     bookingstatus/      THE blocking / effective-status SQL; use it, never re-type it
     venue/              venues, schedule (start-time grid), free times, table map
     booking/            guest bookings
-    owner/              owner views + CheckVenue/CheckBooking ownership helpers
-    bot/                Telegram bot, Notifier
-    notify/             background worker (expiry, reminders)
+    owner/              owner list + Decide (confirm/reject, shared by HTTP and bot)
+    bot/                Telegram: Sender interface, Notifier, /start, menu button, callbacks;
+                        every user-facing text is in bot/texts.go
+    notify/             background worker: expire overdue holds, send reminders
     platform/           config, database, dbtest, httpx (JSON, errors), logging
   migrations/           0001_init.sql (+ schema_test.go)
   seed/dev.sql          dev data (psql variable owner_id)
@@ -46,6 +47,7 @@ Each domain package uses **handler -> service -> repo**:
   database in the compose Postgres. Each DB test wipes and re-migrates the `public`
   schema (`dbtest.New`); it refuses to run on a database whose name lacks "test".
   Run by hand: `TEST_DATABASE_URL=postgres://tablebot:tablebot@localhost:5432/tablebot_test?sslmode=disable go test -p 1 ./...` in `backend/`.
+  `-p 1` is required whenever more than one DB package runs: they share one database.
 - `make lint` — gofmt + go vet.
 - Lint the contract: `npx @redocly/cli lint docs/api.yaml`. HTTP tests in
   `cmd/api/api_test.go` validate every response against it (libopenapi-validator); an
@@ -63,7 +65,9 @@ Each domain package uses **handler -> service -> repo**:
 - Code comments: short, one line, only where the code is not obvious. No long comment blocks.
 - Code must be gofmt + go vet clean.
 - Owner access is per venue (`venues.owner_id = current user`), never a global role.
-  Owner handlers must call `owner.Service.CheckVenue` / `CheckBooking`.
+  Owner code must go through `owner.Service` (`CheckVenue` / `CheckBooking` / `List` / `Decide`).
+- Telegram: talk to it only through `bot.Sender` (fake it in tests). With an empty
+  `BOT_TOKEN`, `bot.LogSender` logs every message instead, so dev runs the same code.
 - Floor plans: SVG, `viewBox="0 0 1000 700"`, no tables drawn. Table `x`/`y` are the
   table centre in percent of plan width/height. Rename the file when a plan changes
   (served with a 30-day cache).
@@ -101,8 +105,15 @@ Each domain package uses **handler -> service -> repo**:
      table or user -> `expired`).
   3. INSERT. Map SQLSTATE `23P01` on `bookings_no_table_overlap` -> 409 `table_taken`,
      on `bookings_no_user_overlap` -> 409 `user_busy`.
-- Side effects (Telegram notifications) go through `booking.Notifier`, called after
-  commit; their errors are logged, never returned.
+- **Confirm / reject**: `owner.Service.Decide`, used by both the HTTP handler and the bot
+  callback (`bk:c:<id>` / `bk:r:<id>`). Ownership check first (403/404), then the single
+  atomic `bookingstatus.DecideSQL` (`... WHERE status = 'pending' AND expires_at > now()`);
+  0 rows -> 409 `not_pending`.
+- **Worker** (`notify.Worker`, every `REMINDER_INTERVAL`): `ExpireAllOverdueSQL` -> tell each
+  guest; `ClaimRemindersSQL` (confirmed, not yet reminded, starting within `REMINDER_BEFORE`)
+  -> remind each guest. The UPDATE marks rows first, so each guest is told at most once.
+- Notifications (`bot.Notifier`) run after commit. Send failures (e.g. the user never
+  started the bot) are logged at warn with `booking_id` and never fail a request.
 - Venue times: build with `time.Date` in `venue.Location(timezone)`; TIME columns are
-  read as minutes since midnight (0..1440, so 24:00 works). `/times` accepts dates up to
-  30 days ahead.
+  read as minutes since midnight (0..1440, so 24:00 works). `/times`, `/tables` and
+  `POST /bookings` accept dates up to `venue.MaxDaysAhead` (30) days ahead.
