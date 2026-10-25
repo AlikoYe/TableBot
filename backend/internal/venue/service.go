@@ -9,13 +9,7 @@ import (
 	"time"
 )
 
-// MaxDaysAhead is how far ahead /times accepts a date.
-const MaxDaysAhead = 30
-
-var (
-	ErrNotFound    = errors.New("venue not found")
-	ErrTooFarAhead = fmt.Errorf("date is more than %d days ahead", MaxDaysAhead)
-)
+var ErrNotFound = errors.New("venue not found")
 
 // Categories mirror the venues.category CHECK constraint.
 var Categories = []string{"restaurant", "cafe", "bar", "billiards", "karaoke", "other"}
@@ -116,10 +110,8 @@ func (s *Service) Times(ctx context.Context, venueID int64, date time.Time, gues
 		return nil, err
 	}
 	now := s.now()
-	today := now.In(sched.Location)
 	y, m, d := date.Date()
-	days := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Sub(time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC))
-	if days > MaxDaysAhead*24*time.Hour {
+	if sched.TooFarAhead(y, m, d, now) {
 		return nil, ErrTooFarAhead
 	}
 

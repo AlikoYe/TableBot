@@ -2,12 +2,17 @@ package venue
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
+
+// MaxDaysAhead is how far after the venue-local today a booking may start.
+const MaxDaysAhead = 30
 
 var (
 	ErrOutsideHours = errors.New("start time is outside opening hours")
 	ErrInPast       = errors.New("start time must be in the future")
+	ErrTooFarAhead  = fmt.Errorf("date is more than %d days ahead", MaxDaysAhead)
 )
 
 // Schedule is a venue's booking grid. Minutes are since local midnight (0..1440).
@@ -48,7 +53,15 @@ func (s Schedule) StartTimes(year int, month time.Month, day int, now time.Time)
 	return out
 }
 
-// Check returns ErrOutsideHours if startsAt is not on the grid, ErrInPast if it is not after now.
+// TooFarAhead reports whether the local date is more than MaxDaysAhead days after the local today.
+func (s Schedule) TooFarAhead(year int, month time.Month, day int, now time.Time) bool {
+	today := now.In(s.Location)
+	days := time.Date(year, month, day, 0, 0, 0, 0, time.UTC).Sub(time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC))
+	return days > MaxDaysAhead*24*time.Hour
+}
+
+// Check returns ErrOutsideHours if startsAt is not on the grid, ErrInPast if it is not after now,
+// ErrTooFarAhead if it is beyond MaxDaysAhead.
 func (s Schedule) Check(startsAt, now time.Time) error {
 	local := startsAt.In(s.Location)
 	onGrid := false
@@ -63,6 +76,9 @@ func (s Schedule) Check(startsAt, now time.Time) error {
 	}
 	if !startsAt.After(now) {
 		return ErrInPast
+	}
+	if y, m, d := local.Date(); s.TooFarAhead(y, m, d, now) {
+		return ErrTooFarAhead
 	}
 	return nil
 }
