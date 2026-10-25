@@ -18,7 +18,7 @@ OWNER ?= 1
 
 .PHONY: help
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 # ---- Local development -----------------------------------------------------
 
@@ -93,6 +93,44 @@ lint: ## gofmt check + go vet (+ golangci-lint if installed)
 	@cd backend && out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	cd backend && go vet ./...
 	@if command -v golangci-lint >/dev/null; then cd backend && golangci-lint run; else echo "golangci-lint not installed, skipping"; fi
+
+# ---- Production (run these on the server, in /opt/tablebot) ---------------
+
+PROD_PROJECT ?= tablebot
+PROD_COMPOSE := docker compose -p $(PROD_PROJECT) --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml
+
+.PHONY: prod-up
+prod-up: ## [server] Rebuild and restart the current checkout, then health-check
+	APP_DIR=$(CURDIR) COMPOSE_PROJECT=$(PROD_PROJECT) bash deploy/deploy.sh --no-pull
+
+.PHONY: prod-logs
+prod-logs: ## [server] Follow logs of all services (Ctrl+C to stop)
+	$(PROD_COMPOSE) logs -f --tail 200
+
+.PHONY: prod-ps
+prod-ps: ## [server] Show container status
+	$(PROD_COMPOSE) ps -a
+
+.PHONY: prod-seed
+prod-seed: ## [server] Load demo venues owned by you: make prod-seed OWNER=<telegram_id>
+	@if [ "$(origin OWNER)" != "command line" ]; then echo "usage: make prod-seed OWNER=<your telegram id>  (find it with @userinfobot)"; exit 1; fi
+	$(PROD_COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -v owner_id=$(OWNER) -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < backend/seed/dev.sql
+
+.PHONY: prod-psql
+prod-psql: ## [server] Open psql on the production database
+	$(PROD_COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+
+.PHONY: prod-backup
+prod-backup: ## [server] Dump the database to backups/ now (keeps the newest 7)
+	APP_DIR=$(CURDIR) COMPOSE_PROJECT=$(PROD_PROJECT) bash deploy/backup.sh
+
+.PHONY: prod-restore
+prod-restore: ## [server] REPLACE the database with a backup: make prod-restore FILE=backups/<file>.sql.gz
+	@if [ -z "$(FILE)" ] || [ ! -f "$(FILE)" ]; then echo "usage: make prod-restore FILE=backups/tablebot-YYYYMMDD-HHMMSS.sql.gz"; echo "available:"; ls -1 backups/*.sql.gz 2>/dev/null; exit 1; fi
+	$(PROD_COMPOSE) stop api
+	set -o pipefail; gunzip -c "$(FILE)" | $(PROD_COMPOSE) exec -T postgres sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+	$(PROD_COMPOSE) start api
+	@echo "Restored $(FILE)."
 
 # ---- Full stack in docker --------------------------------------------------
 
