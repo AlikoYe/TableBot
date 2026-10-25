@@ -75,12 +75,11 @@ func MethodNotAllowed(w http.ResponseWriter, _ *http.Request) {
 }
 
 // DecodeJSON reads a single JSON object from the request body into dst.
-// Unknown fields and trailing data are rejected. The returned error is safe
-// to show to the client.
+// Unknown fields are ignored; trailing data is rejected. The returned error is
+// safe to show to the client.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(dst); err != nil {
 		var maxErr *http.MaxBytesError

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +35,9 @@ type Config struct {
 
 	ReminderInterval time.Duration
 	ShutdownTimeout  time.Duration
+
+	// HoldMinutes is how long a pending booking waits for the owner before it expires.
+	HoldMinutes int
 }
 
 func (c Config) IsDev() bool { return c.AppEnv == EnvDev }
@@ -74,6 +78,9 @@ func Load() (Config, error) {
 	if cfg.ShutdownTimeout, err = durationEnv("SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
 		errs = append(errs, err)
 	}
+	if cfg.HoldMinutes, err = positiveIntEnv("HOLD_MINUTES", 15); err != nil {
+		errs = append(errs, err)
+	}
 
 	return cfg, errors.Join(errs...)
 }
@@ -95,4 +102,16 @@ func durationEnv(key string, fallback time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a positive duration like 30s or 1m; got %q", key, v)
 	}
 	return d, nil
+}
+
+func positiveIntEnv(key string, fallback int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer; got %q", key, v)
+	}
+	return n, nil
 }
