@@ -37,8 +37,14 @@ info:
     Only `pending` and `confirmed` bookings hold a table.
 
     ## Status of this contract
-    Implemented: `/health`, `/me`, `/static/plans/{file}`. Every other endpoint
-    currently returns `501 not_implemented` and will be built against this spec.
+    Implemented: `/health`, `/me`, `/static/plans/{file}`, `/venues/*` and `/bookings/*`.
+    The `/owner/*` endpoints currently return `501 not_implemented` and will be
+    built against this spec.
+
+    ## Booking status as seen by readers
+    Every response reports the *effective* status: a `pending` booking whose
+    `expires_at` has passed is returned as `expired`, even before the background
+    worker updates the row.
 
     ## Error codes
     | code | HTTP | when |
@@ -53,7 +59,7 @@ info:
     | `not_pending` | 409 | Owner confirm/reject of a booking that is not `pending` (already decided, cancelled or expired, including pending bookings past `expires_at`). |
     | `not_cancellable` | 409 | Guest cancel of a booking that is not `pending`/`confirmed`, or that has already started. |
     | `too_many_guests` | 422 | `POST /bookings`: `guests` is more than the table's `seats`. |
-    | `outside_hours` | 422 | `starts_at` is not on the venue's slot grid (`opens_at` + n x `slot_step_minutes`), or the booking would end after `closes_at`. |
+    | `outside_hours` | 422 | `starts_at` is not on the venue's slot grid (`opens_at` + n x `slot_step_minutes`), or the booking would end after `closes_at`. For `/venues/{id}/times`: `date` is more than 30 days after the venue-local today. |
     | `in_past` | 422 | `starts_at` is not in the future. |
     | `not_implemented` | 501 | Endpoint is in the contract but not built yet. |
     | `internal` | 500 | Unexpected server error. |
@@ -131,7 +137,7 @@ paths:
           schema: { $ref: "#/components/schemas/Category" }
       responses:
         "200":
-          description: Active venues ordered by name.
+          description: Active venues ordered by `id`. An unknown `category` is `400 bad_request`.
           content:
             application/json:
               schema:
@@ -139,7 +145,6 @@ paths:
                 items: { $ref: "#/components/schemas/Venue" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /venues/{id}:
     parameters:
@@ -157,7 +162,6 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /venues/{id}/times:
     parameters:
@@ -173,10 +177,16 @@ paths:
         future. `free_tables` counts active tables with `seats >= guests` and no
         pending/confirmed booking overlapping `[starts_at, ends_at)`.
         Times with `free_tables: 0` are included so the UI can show them disabled.
-        A past date returns an empty array.
+        A past date returns an empty array. A date more than 30 days after the
+        venue-local today is `422 outside_hours`.
       parameters:
         - $ref: "#/components/parameters/Date"
-        - $ref: "#/components/parameters/Guests"
+        - name: guests
+          in: query
+          required: false
+          description: Party size. Defaults to 1.
+          schema: { type: integer, minimum: 1, maximum: 20, default: 1 }
+          example: 4
       responses:
         "200":
           description: Ordered by `starts_at`.
@@ -191,7 +201,12 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
+        "422":
+          description: "`outside_hours`: the date is more than 30 days ahead."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: outside_hours, message: "date is more than 30 days ahead" }
 
   /venues/{id}/tables:
     parameters:
@@ -218,7 +233,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/Unprocessable" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /bookings:
     post:
@@ -245,14 +259,13 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/BookingConflict" }
         "422": { $ref: "#/components/responses/Unprocessable" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /bookings/my:
     get:
       tags: [bookings]
       operationId: listMyBookings
       summary: The current user's bookings, newest first
-      description: All statuses, ordered by `starts_at` descending.
+      description: All statuses (effective, see above), ordered by `starts_at` descending, at most 100.
       responses:
         "200":
           description: OK
@@ -262,7 +275,6 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Booking" }
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /bookings/{id}/cancel:
     parameters:
@@ -281,7 +293,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/StateConflict" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /owner/bookings:
     get:
@@ -631,7 +642,7 @@ components:
     CreateBookingRequest:
       type: object
       required: [table_id, starts_at, guests]
-      additionalProperties: false
+      description: Unknown fields are ignored.
       properties:
         table_id: { type: integer, format: int64, minimum: 1 }
         starts_at: { type: string, format: date-time, description: "A start time from /venues/{id}/times." }
@@ -648,14 +659,17 @@ components:
       required: [id, status, guests, starts_at, ends_at, expires_at, special_request, created_at, venue, table]
       properties:
         id: { type: integer, format: int64 }
-        status: { type: string, enum: [pending, confirmed, rejected, cancelled, expired] }
+        status:
+          type: string
+          enum: [pending, confirmed, rejected, cancelled, expired]
+          description: Effective status; an overdue pending booking is reported as `expired`.
         guests: { type: integer, minimum: 1, maximum: 20 }
         starts_at: { type: string, format: date-time }
         ends_at: { type: string, format: date-time }
         expires_at:
           type: [string, "null"]
           format: date-time
-          description: "When a pending booking expires if nobody decides. Non-null while pending; may stay set afterwards — only meaningful when status is pending."
+          description: "When a pending booking expires if nobody decides. Set only when status is pending, otherwise null."
         special_request: { type: string }
         created_at: { type: string, format: date-time }
         venue:

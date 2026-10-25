@@ -19,9 +19,12 @@ import (
 	"github.com/AlikoYe/TableBot/backend/static"
 )
 
-func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Handler {
+func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, notifier booking.Notifier) http.Handler {
 	ownerSvc := owner.NewService(owner.NewRepo(pool))
 	ownerHandler := owner.NewHandler(ownerSvc, log)
+	venueSvc := venue.NewService(venue.NewRepo(pool))
+	venues := venue.NewHandler(venueSvc, log)
+	bookings := booking.NewHandler(booking.NewService(booking.NewRepo(pool), venueSvc, notifier, cfg.HoldMinutes, log), log)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -43,8 +46,8 @@ func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool) http.Han
 			}))
 
 			r.Get("/me", auth.MeHandler(ownerSvc, log))
-			r.Route("/venues", venue.Routes)
-			r.Route("/bookings", booking.Routes)
+			r.Route("/venues", venues.Routes)
+			r.Route("/bookings", bookings.Routes)
 			r.Route("/owner", ownerHandler.Routes)
 		})
 	})

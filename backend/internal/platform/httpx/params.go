@@ -49,3 +49,11 @@ func QueryInt(r *http.Request, name string, min, max int) (int, error) {
 	}
 	return n, nil
 }
+
+// QueryIntDefault is QueryInt for an optional parameter.
+func QueryIntDefault(r *http.Request, name string, def, min, max int) (int, error) {
+	if r.URL.Query().Get(name) == "" {
+		return def, nil
+	}
+	return QueryInt(r, name, min, max)
+}

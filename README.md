@@ -5,9 +5,9 @@ bars, billiards, karaoke. The guest picks a time and a table on the venue's floo
 plan, the venue owner confirms or rejects, and the database makes double booking
 impossible.
 
-> **Status: MVP foundation.** Schema, API contract (`docs/api.yaml`), auth,
-> `/api/me`, floor plans and seed data are done. Venue and booking endpoints are
-> registered but return `501 not_implemented` until they are built.
+> **Status: MVP in progress.** Schema, API contract (`docs/api.yaml`), auth,
+> `/api/me`, floor plans, seed data and the diner side (`/venues/*`, `/bookings/*`)
+> are done. Owner endpoints (`/owner/*`) return `501 not_implemented` for now.
 
 ## Stack
 
@@ -86,6 +86,7 @@ All variables are read from `.env`. See `.env.example`.
 | `DATABASE_URL` | (required) | Postgres URL for the host. Compose builds its own URL for containers. |
 | `BOT_TOKEN` | (required outside dev) | Bot token. It is also the key used to validate `initData`. When empty in dev, the bot is disabled. |
 | `WEBAPP_URL` | (empty) | HTTPS URL for the `/start` button |
+| `HOLD_MINUTES` | `15` | How long a pending booking waits for the owner before it expires |
 | `REMINDER_INTERVAL` | `1m` | Reminder worker tick |
 | `SHUTDOWN_TIMEOUT` | `10s` | Graceful HTTP shutdown timeout |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_PORT` | `tablebot` / `tablebot` / `tablebot` / `5432` | Compose Postgres |
@@ -102,13 +103,13 @@ See [`docs/api.yaml`](docs/api.yaml) (OpenAPI 3.1). All routes live under
 | GET  | `/api/health` | none | done |
 | GET  | `/api/me` | user | done |
 | GET  | `/api/static/plans/{file}` | none | done |
-| GET  | `/api/venues?category=` | user | 501 |
-| GET  | `/api/venues/{id}` | user | 501 |
-| GET  | `/api/venues/{id}/times?date=YYYY-MM-DD&guests=N` | user | 501 |
-| GET  | `/api/venues/{id}/tables?starts_at=<RFC3339>&guests=N` | user | 501 |
-| POST | `/api/bookings` | user | 501 |
-| GET  | `/api/bookings/my` | user | 501 |
-| POST | `/api/bookings/{id}/cancel` | user | 501 |
+| GET  | `/api/venues?category=` | user | done |
+| GET  | `/api/venues/{id}` | user | done |
+| GET  | `/api/venues/{id}/times?date=YYYY-MM-DD&guests=N` | user | done |
+| GET  | `/api/venues/{id}/tables?starts_at=<RFC3339>&guests=N` | user | done |
+| POST | `/api/bookings` | user | done |
+| GET  | `/api/bookings/my` | user | done |
+| POST | `/api/bookings/{id}/cancel` | user | done |
 | GET  | `/api/owner/bookings?venue_id=&date=YYYY-MM-DD` | venue owner | 501 |
 | POST | `/api/owner/bookings/{id}/confirm` | venue owner | 501 |
 | POST | `/api/owner/bookings/{id}/reject` | venue owner | 501 |
@@ -124,9 +125,9 @@ See [`docs/api.yaml`](docs/api.yaml) (OpenAPI 3.1). All routes live under
   error code. Lists are plain arrays; errors are `{"error": "<code>", "message": "..."}`.
 - **Floor plans:** `floor_plan_url` is an SVG with `viewBox="0 0 1000 700"` (10:7) and no tables
   drawn. Draw each table centred at `x`% of the width and `y`% of the height.
-- **Not built yet:** everything except `/health`, `/me` and the plan images returns
-  `501 {"error": "not_implemented"}` for now. The request/response shapes in the contract
-  will not change without a note in the PR.
+- **Not built yet:** the `/owner/*` endpoints return `501 {"error": "not_implemented"}`
+  for now. The request/response shapes in the contract will not change without a note
+  in the PR.
 
 ```bash
 curl -H 'Authorization: dev 1' localhost:8080/api/me
@@ -141,8 +142,9 @@ backend/
   cmd/migrate/        goose runner using the embedded migrations (up|down|status)
   internal/
     auth/             initData validation, middleware (dev bypass, user upsert), /me
-    venue/            venue routes (501 for now)
-    booking/          booking routes (501 for now)
+    bookingstatus/    shared "blocking" / effective-status SQL
+    venue/            venues, schedule grid, free times, table map
+    booking/          create / my / cancel, Notifier hook
     owner/            owner routes (501) + per-venue ownership checks
     bot/              go-telegram/bot setup, /start, Notifier interface
     notify/           background worker (ticker only)

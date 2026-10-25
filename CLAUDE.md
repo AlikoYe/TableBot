@@ -16,7 +16,8 @@ backend/
   cmd/migrate/          goose runner (up | down | status)
   internal/
     auth/               initData validation, middleware (upserts user), /me, UserRepo
-    venue/              venues, free times, table map
+    bookingstatus/      THE blocking / effective-status SQL; use it, never re-type it
+    venue/              venues, schedule (start-time grid), free times, table map
     booking/            guest bookings
     owner/              owner views + CheckVenue/CheckBooking ownership helpers
     bot/                Telegram bot, Notifier
@@ -40,13 +41,15 @@ Each domain package uses **handler -> service -> repo**:
 - `make dev` — Postgres in Docker, migrations, API on :8080 and Vite on :5173.
 - `make seed` / `make seed OWNER=<telegram_id>` — 3 Almaty venues owned by that user, plus customer user 2.
 - `make db-reset` — deletes the local Postgres volume and re-migrates (needed once after schema rewrites).
-- `make test` — unit tests; DB tests skip without `TEST_DATABASE_URL`.
+- `make test` — unit tests; DB tests are skipped (it unsets `TEST_DATABASE_URL`).
 - `make test-db` — all tests incl. DB integration tests against the `tablebot_test`
   database in the compose Postgres. Each DB test wipes and re-migrates the `public`
   schema (`dbtest.New`); it refuses to run on a database whose name lacks "test".
   Run by hand: `TEST_DATABASE_URL=postgres://tablebot:tablebot@localhost:5432/tablebot_test?sslmode=disable go test -p 1 ./...` in `backend/`.
 - `make lint` — gofmt + go vet.
-- Lint the contract: `npx @redocly/cli lint docs/api.yaml`.
+- Lint the contract: `npx @redocly/cli lint docs/api.yaml`. HTTP tests in
+  `cmd/api/api_test.go` validate every response against it (libopenapi-validator); an
+  undocumented status code or field fails the test.
 
 ## Conventions
 
@@ -78,20 +81,28 @@ Each domain package uses **handler -> service -> repo**:
 - A booking lasts `venues.booking_minutes`. Start times are every `slot_step_minutes`
   from `opens_at`; the booking must end by `closes_at` (24:00 allowed, no overnight
   hours); the start must be in the future.
-- New bookings are `pending` with `expires_at = now() + 15 minutes`.
+- New bookings are `pending` with `expires_at = now() + HOLD_MINUTES` (env, default 15).
   Owner confirms -> `confirmed`, rejects -> `rejected` (set `decided_at`).
   The worker flips overdue pending -> `expired`.
   The guest cancels `pending`/`confirmed` -> `cancelled`.
 - `guests <= table seats`. One user cannot hold overlapping active bookings anywhere.
-- Only `pending` and `confirmed` hold a table (`bookings_no_table_overlap`,
-  `bookings_no_user_overlap` exclusion constraints). `during` is `[start, end)`, so
-  back-to-back bookings are fine.
-- When computing availability, treat `pending` rows with `expires_at < now()` as free.
-- **Expire before insert**: inside the create-booking transaction, first run
-  ```sql
-  UPDATE bookings SET status = 'expired', updated_at = now()
-  WHERE status = 'pending' AND expires_at < now()
-    AND (table_id = $table OR user_id = $user);
-  ```
-  then INSERT. Map SQLSTATE `23P01` on `bookings_no_table_overlap` -> 409 `table_taken`,
-  on `bookings_no_user_overlap` -> 409 `user_busy`.
+- `during` is `[start, end)`, so back-to-back bookings are fine. The DB exclusion
+  constraints (`bookings_no_table_overlap`, `bookings_no_user_overlap`) cover rows with
+  status `pending` or `confirmed`.
+- A booking **blocks** a table/user if `status = 'confirmed' OR (status = 'pending' AND
+  expires_at > now())` -> `bookingstatus.BlockingSQL`. Every read reports the **effective
+  status** (overdue pending reads as `expired`) -> `bookingstatus.EffectiveSQL`.
+  `expires_at` is returned only while the effective status is `pending`.
+- **Create-booking transaction** (`booking.Repo.Insert`), in this order:
+  1. `SELECT ... FROM venue_tables WHERE id = $table FOR NO KEY UPDATE`, then the same on
+     `users` for `$user`. Always table first, then user. Without these locks, racing
+     inserts deadlock inside the exclusion constraints (40P01 -> 500).
+  2. Expire before insert: `bookingstatus.ExpireOverdueSQL` (overdue pending on this
+     table or user -> `expired`).
+  3. INSERT. Map SQLSTATE `23P01` on `bookings_no_table_overlap` -> 409 `table_taken`,
+     on `bookings_no_user_overlap` -> 409 `user_busy`.
+- Side effects (Telegram notifications) go through `booking.Notifier`, called after
+  commit; their errors are logged, never returned.
+- Venue times: build with `time.Date` in `venue.Location(timezone)`; TIME columns are
+  read as minutes since midnight (0..1440, so 24:00 works). `/times` accepts dates up to
+  30 days ahead.
