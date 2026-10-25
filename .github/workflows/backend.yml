@@ -17,6 +17,20 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tablebot
+          POSTGRES_PASSWORD: tablebot
+          POSTGRES_DB: tablebot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tablebot -d tablebot_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -34,8 +48,10 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: go test
-        run: go test -race ./...
+      - name: go test (including DB integration tests)
+        env:
+          TEST_DATABASE_URL: postgres://tablebot:tablebot@localhost:5432/tablebot_test?sslmode=disable
+        run: go test -race -count=1 -p 1 ./...
 
       - name: go build
         run: go build ./...
