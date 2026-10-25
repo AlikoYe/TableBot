@@ -38,6 +38,8 @@ type Config struct {
 
 	// HoldMinutes is how long a pending booking waits for the owner before it expires.
 	HoldMinutes int
+	// ReminderBefore is how long before the start a confirmed guest gets a reminder.
+	ReminderBefore time.Duration
 }
 
 func (c Config) IsDev() bool { return c.AppEnv == EnvDev }
@@ -76,6 +78,9 @@ func Load() (Config, error) {
 		errs = append(errs, err)
 	}
 	if cfg.ShutdownTimeout, err = durationEnv("SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
+		errs = append(errs, err)
+	}
+	if cfg.ReminderBefore, err = durationEnv("REMINDER_BEFORE", 2*time.Hour); err != nil {
 		errs = append(errs, err)
 	}
 	if cfg.HoldMinutes, err = positiveIntEnv("HOLD_MINUTES", 15); err != nil {

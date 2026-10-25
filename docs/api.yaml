@@ -37,9 +37,7 @@ info:
     Only `pending` and `confirmed` bookings hold a table.
 
     ## Status of this contract
-    Implemented: `/health`, `/me`, `/static/plans/{file}`, `/venues/*` and `/bookings/*`.
-    The `/owner/*` endpoints currently return `501 not_implemented` and will be
-    built against this spec.
+    All endpoints are implemented.
 
     ## Booking status as seen by readers
     Every response reports the *effective* status: a `pending` booking whose
@@ -59,9 +57,8 @@ info:
     | `not_pending` | 409 | Owner confirm/reject of a booking that is not `pending` (already decided, cancelled or expired, including pending bookings past `expires_at`). |
     | `not_cancellable` | 409 | Guest cancel of a booking that is not `pending`/`confirmed`, or that has already started. |
     | `too_many_guests` | 422 | `POST /bookings`: `guests` is more than the table's `seats`. |
-    | `outside_hours` | 422 | `starts_at` is not on the venue's slot grid (`opens_at` + n x `slot_step_minutes`), or the booking would end after `closes_at`. For `/venues/{id}/times`: `date` is more than 30 days after the venue-local today. |
+    | `outside_hours` | 422 | `starts_at` is not on the venue's slot grid (`opens_at` + n x `slot_step_minutes`), or the booking would end after `closes_at`. Also when the date (`/venues/{id}/times`) or `starts_at` (`/venues/{id}/tables`, `POST /bookings`) is more than 30 days after the venue-local today. |
     | `in_past` | 422 | `starts_at` is not in the future. |
-    | `not_implemented` | 501 | Endpoint is in the contract but not built yet. |
     | `internal` | 500 | Unexpected server error. |
     | `unavailable` | 503 | `/health`: the database is unreachable. |
   license:
@@ -219,7 +216,7 @@ paths:
         - name: starts_at
           in: query
           required: true
-          description: A start time from `/venues/{id}/times` (RFC 3339, any offset; `+` must be URL-encoded as `%2B`).
+          description: A start time from `/venues/{id}/times` (RFC 3339, any offset; `+` should be URL-encoded as `%2B`). Must be on the slot grid, in the future and at most 30 days ahead.
           schema: { type: string, format: date-time }
           example: "2026-10-27T19:00:00+05:00"
         - $ref: "#/components/parameters/Guests"
@@ -241,7 +238,9 @@ paths:
       summary: Request a table
       description: |
         Creates a `pending` booking for `[starts_at, starts_at + booking_minutes)`
-        that expires 15 minutes later unless the owner confirms or rejects it.
+        that expires `HOLD_MINUTES` (default 15) minutes later unless the owner confirms
+        or rejects it. `starts_at` must be on the slot grid, in the future and at most
+        30 days after the venue-local today.
         The venue is the table's venue. The owner is notified in Telegram.
       requestBody:
         required: true
@@ -331,7 +330,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /owner/bookings/{id}/confirm:
     parameters:
@@ -340,7 +338,9 @@ paths:
       tags: [owner]
       operationId: confirmBooking
       summary: Confirm a pending booking at your venue
-      description: The guest is notified in Telegram.
+      description: |
+        Only while the booking is `pending` and its hold has not expired; otherwise
+        `409 not_pending`. The guest is notified in Telegram.
       responses:
         "200":
           description: The booking, now `confirmed`. Includes `guest`.
@@ -352,7 +352,6 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/StateConflict" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /owner/bookings/{id}/reject:
     parameters:
@@ -361,7 +360,9 @@ paths:
       tags: [owner]
       operationId: rejectBooking
       summary: Reject a pending booking at your venue
-      description: The guest is notified in Telegram. The table becomes free again.
+      description: |
+        Only while the booking is `pending` and its hold has not expired; otherwise
+        `409 not_pending`. The guest is notified in Telegram. The table becomes free again.
       responses:
         "200":
           description: The booking, now `rejected`. Includes `guest`.
@@ -373,7 +374,6 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/StateConflict" }
-        "501": { $ref: "#/components/responses/NotImplemented" }
 
   /static/plans/{file}:
     get:
@@ -493,14 +493,10 @@ components:
               value: { error: too_many_guests, message: "table T1 seats 2 guests" }
             outside_hours:
               value: { error: outside_hours, message: "start time is outside opening hours" }
+            too_far_ahead:
+              value: { error: outside_hours, message: "date is more than 30 days ahead" }
             in_past:
               value: { error: in_past, message: "start time must be in the future" }
-    NotImplemented:
-      description: "`not_implemented`"
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/Error" }
-          example: { error: not_implemented, message: "not implemented yet" }
     Unavailable:
       description: "`unavailable`"
       content:
@@ -528,7 +524,6 @@ components:
             - in_past
             - not_pending
             - not_cancellable
-            - not_implemented
             - internal
             - unavailable
         message: { type: string }

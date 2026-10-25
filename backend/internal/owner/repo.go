@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AlikoYe/TableBot/backend/internal/bookingstatus"
 )
 
 // Repo is the PostgreSQL data access layer for owner features.
@@ -30,17 +32,16 @@ func (r *Repo) OwnedVenueIDs(ctx context.Context, userID int64) ([]int64, error)
 	return ids, nil
 }
 
-// VenueOwner returns the venue's owner_id (0 when it has none).
-func (r *Repo) VenueOwner(ctx context.Context, venueID int64) (int64, error) {
-	var ownerID int64
-	err := r.db.QueryRow(ctx, `SELECT COALESCE(owner_id, 0) FROM venues WHERE id = $1`, venueID).Scan(&ownerID)
+// VenueOwner returns the venue's owner_id (0 when it has none) and time zone.
+func (r *Repo) VenueOwner(ctx context.Context, venueID int64) (ownerID int64, timezone string, err error) {
+	err = r.db.QueryRow(ctx, `SELECT COALESCE(owner_id, 0), timezone FROM venues WHERE id = $1`, venueID).Scan(&ownerID, &timezone)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNotFound
+		return 0, "", ErrNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("select venue owner: %w", err)
+		return 0, "", fmt.Errorf("select venue owner: %w", err)
 	}
-	return ownerID, nil
+	return ownerID, timezone, nil
 }
 
 // BookingVenueOwner returns the booking's venue and that venue's owner_id (0 when none).
@@ -56,4 +57,13 @@ func (r *Repo) BookingVenueOwner(ctx context.Context, bookingID int64) (venueID,
 		return 0, 0, fmt.Errorf("select booking venue owner: %w", err)
 	}
 	return venueID, ownerID, nil
+}
+
+// Decide sets status on a booking that is still a live hold; false means it was not pending.
+func (r *Repo) Decide(ctx context.Context, bookingID int64, status string) (bool, error) {
+	tag, err := r.db.Exec(ctx, bookingstatus.DecideSQL, bookingID, status)
+	if err != nil {
+		return false, fmt.Errorf("decide booking: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }

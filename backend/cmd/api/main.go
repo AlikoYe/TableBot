@@ -15,7 +15,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/AlikoYe/TableBot/backend/internal/booking"
 	"github.com/AlikoYe/TableBot/backend/internal/bot"
 	"github.com/AlikoYe/TableBot/backend/internal/notify"
 	"github.com/AlikoYe/TableBot/backend/internal/platform/config"
@@ -47,30 +46,35 @@ func run() error {
 	}
 	defer pool.Close()
 
-	// The bot is optional in dev so the API can run without a token.
+	// The bot is optional in dev: without a token, messages are only logged.
 	var (
-		tg       *bot.Bot
-		notifier bot.Notifier = bot.LogNotifier{Log: log}
+		tg     *bot.Bot
+		sender bot.Sender = bot.LogSender{Log: log}
 	)
 	if cfg.BotToken != "" {
 		tg, err = bot.New(cfg.BotToken, cfg.WebAppURL, log)
 		if err != nil {
 			return err
 		}
-		notifier = tg
+		sender = tg.Sender()
 	} else {
-		log.Warn("BOT_TOKEN is empty: telegram bot disabled, only dev auth will work")
+		log.Warn("BOT_TOKEN is empty: telegram bot disabled, messages are logged and only dev auth works")
+	}
+	notifier := bot.NewNotifier(sender, cfg.WebAppURL, log)
+	svc := newServices(cfg, log, pool, notifier)
+	if tg != nil {
+		tg.Handle(svc.owner)
 	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           newRouter(cfg, log, pool, booking.NopNotifier{}),
+		Handler:           newRouter(cfg, log, pool, svc),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	worker := notify.NewWorker(cfg.ReminderInterval, notifier, log)
+	worker := notify.NewWorker(pool, svc.bookingRepo, notifier, cfg.ReminderInterval, cfg.ReminderBefore, log)
 
 	g, gctx := errgroup.WithContext(ctx)
 
@@ -93,7 +97,10 @@ func run() error {
 	}
 	g.Go(func() error { return worker.Run(gctx) })
 
-	if err := g.Wait(); err != nil {
+	err = g.Wait()
+	// Let in-flight Telegram sends finish; each is bounded by bot.SendTimeout.
+	notifier.Wait()
+	if err != nil {
 		return err
 	}
 	log.Info("stopped cleanly")

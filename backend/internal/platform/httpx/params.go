@@ -57,3 +57,12 @@ func QueryIntDefault(r *http.Request, name string, def, min, max int) (int, erro
 	}
 	return QueryInt(r, name, min, max)
 }
+
+// QueryID parses a required positive int64 query parameter.
+func QueryID(r *http.Request, name string) (int64, error) {
+	id, err := strconv.ParseInt(r.URL.Query().Get(name), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("query parameter %q must be a positive integer", name)
+	}
+	return id, nil
+}

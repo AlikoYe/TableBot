@@ -108,6 +108,13 @@ func TestCheck(t *testing.T) {
 			}
 		})
 	}
+	limit := time.Date(2030, 7, 1, 19, 0, 0, 0, loc) // 30 days after 1 Jun
+	if err := s.Check(limit, now); err != nil {
+		t.Fatalf("30 days ahead: %v, want nil", err)
+	}
+	if err := s.Check(limit.AddDate(0, 0, 1), now); !errors.Is(err, ErrTooFarAhead) {
+		t.Fatalf("31 days ahead: %v, want ErrTooFarAhead", err)
+	}
 	if err := s.Check(at(15, 30), at(15, 30)); !errors.Is(err, ErrInPast) {
 		t.Fatalf("start == now: %v, want ErrInPast", err)
 	}

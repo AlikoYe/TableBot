@@ -19,12 +19,36 @@ import (
 	"github.com/AlikoYe/TableBot/backend/static"
 )
 
-func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, notifier booking.Notifier) http.Handler {
-	ownerSvc := owner.NewService(owner.NewRepo(pool))
-	ownerHandler := owner.NewHandler(ownerSvc, log)
+// Notifier is everything the HTTP side tells users about; bot.Notifier implements it.
+type Notifier interface {
+	booking.Notifier
+	owner.Notifier
+}
+
+// services are shared by the HTTP router, the bot callbacks and the worker.
+type services struct {
+	venues      *venue.Service
+	bookings    *booking.Service
+	bookingRepo *booking.Repo
+	owner       *owner.Service
+}
+
+func newServices(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, notifier Notifier) services {
 	venueSvc := venue.NewService(venue.NewRepo(pool))
-	venues := venue.NewHandler(venueSvc, log)
-	bookings := booking.NewHandler(booking.NewService(booking.NewRepo(pool), venueSvc, notifier, cfg.HoldMinutes, log), log)
+	bookingRepo := booking.NewRepo(pool)
+	return services{
+		venues:      venueSvc,
+		bookings:    booking.NewService(bookingRepo, venueSvc, notifier, cfg.HoldMinutes, log),
+		bookingRepo: bookingRepo,
+		owner:       owner.NewService(owner.NewRepo(pool), bookingRepo, notifier, log),
+	}
+}
+
+func newRouter(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, svc services) http.Handler {
+	ownerSvc := svc.owner
+	ownerHandler := owner.NewHandler(ownerSvc, log)
+	venues := venue.NewHandler(svc.venues, log)
+	bookings := booking.NewHandler(svc.bookings, log)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

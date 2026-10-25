@@ -72,17 +72,19 @@ func (r *Repo) Insert(ctx context.Context, in insertRow) (int64, error) {
 
 const selectBooking = `
 	SELECT b.id, b.user_id, ` + bookingstatus.EffectiveSQL + `, b.guests, lower(b.during), upper(b.during),
-	       b.expires_at, b.special_request, b.created_at, v.id, v.name, v.timezone, t.id, t.label, t.seats
+	       b.expires_at, b.special_request, b.created_at, v.id, v.name, v.timezone, COALESCE(v.owner_id, 0),
+	       t.id, t.label, t.seats, u.name, u.username
 	FROM bookings b
 	JOIN venues v ON v.id = b.venue_id
-	JOIN venue_tables t ON t.id = b.table_id`
+	JOIN venue_tables t ON t.id = b.table_id
+	JOIN users u ON u.telegram_id = b.user_id`
 
 func scanBooking(row pgx.Row) (Booking, error) {
 	var b Booking
 	var tz string
 	err := row.Scan(&b.ID, &b.UserID, &b.Status, &b.Guests, &b.StartsAt, &b.EndsAt,
-		&b.ExpiresAt, &b.SpecialRequest, &b.CreatedAt, &b.Venue.ID, &b.Venue.Name, &tz,
-		&b.Table.ID, &b.Table.Label, &b.Table.Seats)
+		&b.ExpiresAt, &b.SpecialRequest, &b.CreatedAt, &b.Venue.ID, &b.Venue.Name, &tz, &b.OwnerID,
+		&b.Table.ID, &b.Table.Label, &b.Table.Seats, &b.GuestInfo.Name, &b.GuestInfo.Username)
 	if err != nil {
 		return Booking{}, err
 	}
@@ -112,10 +114,21 @@ func (r *Repo) Get(ctx context.Context, id int64) (Booking, error) {
 	return b, nil
 }
 
+// ListForVenue returns the venue's bookings starting in [from, to), ordered by start.
+func (r *Repo) ListForVenue(ctx context.Context, venueID int64, from, to time.Time) ([]Booking, error) {
+	return r.list(ctx, selectBooking+`
+		WHERE b.venue_id = $1 AND lower(b.during) >= $2 AND lower(b.during) < $3
+		ORDER BY lower(b.during), b.id`, venueID, from, to)
+}
+
 // ListForUser returns the user's newest bookings by start time, at most limit.
 func (r *Repo) ListForUser(ctx context.Context, userID int64, limit int) ([]Booking, error) {
-	rows, err := r.db.Query(ctx, selectBooking+`
+	return r.list(ctx, selectBooking+`
 		WHERE b.user_id = $1 ORDER BY lower(b.during) DESC, b.id DESC LIMIT $2`, userID, limit)
+}
+
+func (r *Repo) list(ctx context.Context, sql string, args ...any) ([]Booking, error) {
+	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("select bookings: %w", err)
 	}

@@ -63,7 +63,15 @@ type fakeNotifier struct {
 	mu        sync.Mutex
 	created   []int64
 	cancelled []int64
+	decided   []string // "<id>:<status>"
 	err       error
+}
+
+func (f *fakeNotifier) BookingDecided(_ context.Context, b booking.Booking) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.decided = append(f.decided, fmt.Sprintf("%d:%s", b.ID, b.Status))
+	return f.err
 }
 
 func (f *fakeNotifier) BookingCreated(_ context.Context, b booking.Booking) error {
@@ -91,8 +99,8 @@ type env struct {
 	tableA2, tableA4, tableA6, tableOff, tableB4 int64
 }
 
-// newEnv migrates a clean DB and seeds venue A (10:00-24:00, 120 min, tables of 2/4/6 seats
-// plus an inactive one), venue B (08:00-22:00, 90 min) and an inactive venue.
+// newEnv migrates a clean DB and seeds venue A (owner 1; 10:00-24:00, 120 min, tables of 2/4/6
+// seats plus an inactive one), venue B (owner 99; 08:00-22:00, 90 min) and an inactive venue.
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	db := dbtest.New(t)
@@ -102,14 +110,15 @@ func newEnv(t *testing.T) *env {
 	}
 	e := &env{t: t, db: db, notifier: &fakeNotifier{}, loc: loc}
 	cfg := config.Config{AppEnv: config.EnvDev, HoldMinutes: 15}
-	e.h = newRouter(cfg, slog.New(slog.DiscardHandler), db, e.notifier)
+	log := slog.New(slog.DiscardHandler)
+	e.h = newRouter(cfg, log, db, newServices(cfg, log, db, e.notifier))
 	loadContract(t)
 
-	e.exec(`INSERT INTO users (telegram_id, name) VALUES (1, 'Owner')`)
+	e.exec(`INSERT INTO users (telegram_id, name) VALUES (1, 'Owner'), (99, 'Owner B')`)
 	e.venueA = e.id(`INSERT INTO venues (owner_id, name, category, opens_at, closes_at, booking_minutes, slot_step_minutes, floor_plan_url)
 		VALUES (1, 'Venue A', 'restaurant', '10:00', '24:00', 120, 30, '/api/static/plans/nomad-bistro.svg') RETURNING id`)
 	e.venueB = e.id(`INSERT INTO venues (owner_id, name, category, opens_at, closes_at, booking_minutes, slot_step_minutes)
-		VALUES (1, 'Venue B', 'cafe', '08:00', '22:00', 90, 30) RETURNING id`)
+		VALUES (99, 'Venue B', 'cafe', '08:00', '22:00', 90, 30) RETURNING id`)
 	e.venueOff = e.id(`INSERT INTO venues (name, category, opens_at, closes_at, is_active)
 		VALUES ('Closed', 'bar', '10:00', '20:00', false) RETURNING id`)
 	e.tableA2 = e.id(`INSERT INTO venue_tables (venue_id, label, seats, x, y) VALUES ($1, 'T1', 2, 10, 10) RETURNING id`, e.venueA)
@@ -396,6 +405,7 @@ func TestCreateBookingValidation(t *testing.T) {
 		{"off grid", with("starts_at", e.tomorrow(19, 10)), 422, "outside_hours"},
 		{"ends after close", with("starts_at", e.tomorrow(22, 30)), 422, "outside_hours"},
 		{"in past", with("starts_at", e.tomorrow(19, 0).AddDate(0, 0, -2)), 422, "in_past"},
+		{"more than 30 days ahead", with("starts_at", e.tomorrow(19, 0).AddDate(0, 0, 30)), 422, "outside_hours"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -467,6 +477,8 @@ func TestTimesAndTablesReflectBookings(t *testing.T) {
 	e.wantError(e.call(http.MethodGet, fmt.Sprintf("/api/venues/%d/tables?starts_at=2020-01-01T19:00:00Z&guests=4", e.venueA), 3, nil), 422, "outside_hours")
 	e.wantError(e.call(http.MethodGet, fmt.Sprintf("/api/venues/%d/tables?starts_at=%s&guests=4", e.venueA, e.tomorrow(19, 0).AddDate(0, 0, -2).UTC().Format(time.RFC3339)), 3, nil), 422, "in_past")
 	e.wantError(e.call(http.MethodGet, fmt.Sprintf("/api/venues/%d/tables?guests=4", e.venueA), 3, nil), 400, "bad_request")
+	e.wantError(e.call(http.MethodGet, fmt.Sprintf("/api/venues/%d/tables?starts_at=%s&guests=4", e.venueA, e.tomorrow(19, 0).AddDate(0, 0, 30).UTC().Format(time.RFC3339)), 3, nil), 422, "outside_hours")
+	e.mustCall(http.MethodGet, fmt.Sprintf("/api/venues/%d/tables?starts_at=%s&guests=4", e.venueA, e.tomorrow(19, 0).AddDate(0, 0, 29).UTC().Format(time.RFC3339)), 3, nil, 200, nil)
 }
 
 func TestTimesDates(t *testing.T) {
