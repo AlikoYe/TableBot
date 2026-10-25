@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/AlikoYe/TableBot/backend/internal/booking"
 	"github.com/AlikoYe/TableBot/backend/internal/bot"
 	"github.com/AlikoYe/TableBot/backend/internal/notify"
 	"github.com/AlikoYe/TableBot/backend/internal/platform/config"
@@ -63,7 +64,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           newRouter(cfg, log, pool),
+		Handler:           newRouter(cfg, log, pool, booking.NopNotifier{}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
