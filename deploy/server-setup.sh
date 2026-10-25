@@ -19,6 +19,8 @@ APP_USER="${SUDO_USER:-}"
 . /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || fail "this script supports Ubuntu only (found: ${PRETTY_NAME:-unknown})."
 export DEBIAN_FRONTEND=noninteractive
+# Ubuntu's needrestart would otherwise stop apt with an interactive "restart services?" dialog.
+export NEEDRESTART_MODE=a
 APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 
 step "Updating packages (can take a few minutes)"

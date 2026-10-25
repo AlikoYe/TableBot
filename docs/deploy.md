@@ -205,12 +205,24 @@ A failed deploy shows the container logs right in the job output.
 |---|---|
 | See container status | `make prod-ps` |
 | Follow all logs | `make prod-logs` (Ctrl+C to stop) |
-| Logs of one service | `docker compose -p tablebot --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml logs --tail 200 api` |
 | Redeploy what is checked out | `make prod-up` |
 | Deploy latest `main` | `bash deploy/deploy.sh` |
-| Restart one service | `docker compose -p tablebot --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml restart api` |
 | Database shell | `make prod-psql` |
 | Backup now | `make prod-backup` (files in `/opt/tablebot/backups/`, newest 7 kept) |
+| Restore a backup | `make prod-restore FILE=backups/tablebot-YYYYMMDD-HHMMSS.sql.gz` (see below) |
+
+For anything else, define this shortcut once per SSH session (works in any shell), then
+use it like `docker compose`:
+
+```bash
+dc() { docker compose -p tablebot --env-file /opt/tablebot/.env --project-directory /opt/tablebot -f /opt/tablebot/deploy/docker-compose.yml -f /opt/tablebot/deploy/docker-compose.prod.yml "$@"; }
+```
+
+| Task | Command |
+|---|---|
+| Logs of one service | `dc logs --tail 200 api` (or `caddy`, `postgres`, `migrate`) |
+| Restart one service | `dc restart api` |
+| Stop everything (keeps data) | `dc down` |
 
 ## Troubleshooting
 
@@ -219,8 +231,8 @@ A failed deploy shows the container logs right in the job output.
 | Deploy fails, caddy log shows `obtaining certificate` errors / `timeout during connect` | Let's Encrypt cannot reach the VM on 80/443 | Azure *Networking*: inbound **80 and 443** allowed. On the VM: `sudo ufw status` lists 80/tcp and 443/tcp. Wait a minute and run `make prod-up` again. |
 | caddy log: `no such host` / `NXDOMAIN` for your domain | DNS name label missing or `SITE_ADDRESS` has a typo | Check the public IP's *DNS name label*; `SITE_ADDRESS` must be exactly `<host>` (no `https://`, no `/`). `nslookup <host>` from your Mac must show the VM's IP. |
 | caddy log: `too many certificates` / rate limit | Many failed attempts in a short time | Fix the cause above, then wait (Let's Encrypt limits reset within an hour to a week). Don't loop deploys. |
-| Browser shows **502 Bad Gateway** | `api` is not running | `make prod-ps`; `... logs --tail 200 api migrate`. Common: wrong `POSTGRES_PASSWORD` after the DB was created (see below), or `BOT_TOKEN` empty (api refuses to start outside dev). |
-| api log: `password authentication failed` | `POSTGRES_PASSWORD` changed after the first start | The database keeps the password from its first start. Put the old one back into `.env`. Only if the DB holds nothing you need: `docker compose ... down -v` deletes all data, then deploy again. |
+| Browser shows **502 Bad Gateway** | `api` is not running | `make prod-ps`; `dc logs --tail 200 api migrate`. Common: wrong `POSTGRES_PASSWORD` after the DB was created (see below), or `BOT_TOKEN` empty (api refuses to start outside dev). |
+| api log: `password authentication failed` | `POSTGRES_PASSWORD` changed after the first start | The database keeps the password from its first start. Put the old one back into `.env`. Only if the DB holds nothing you need: `dc down -v` deletes all data, then deploy again. |
 | Bot does not answer `/start` | Wrong token, or the same token runs somewhere else | Check `BOT_TOKEN` is the **prod** bot. Make sure no laptop or other server runs with it. api log line `telegram bot error ... Conflict: terminated by other getUpdates request` confirms a second consumer. Then `make prod-up`. |
 | Menu button does not open the app | `WEBAPP_URL` wrong | Must be `https://<host>`. `make prod-up`, then restart the Telegram app. |
 | Owner gets no booking messages | Owner never pressed **Start** in the bot, or wrong `OWNER` id | Send `/start` to the bot; re-run `make prod-seed OWNER=<your-telegram-id>`. api log `telegram send failed ... chat not found` means the id is wrong or the user never started the bot. |
@@ -246,16 +258,18 @@ Database migrations are not rolled back automatically.
 
 ### Restore a backup
 
-This **replaces** the current database with the backup.
+This **replaces** the current database with the backup. It stops the api, loads the dump
+and starts the api again.
 
 ```bash
 cd /opt/tablebot
 ls -lh backups/
-C="docker compose -p tablebot --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml"
-$C stop api
-gunzip -c backups/tablebot-YYYYMMDD-HHMMSS.sql.gz | $C exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-$C start api
+make prod-backup
+make prod-restore FILE=backups/tablebot-YYYYMMDD-HHMMSS.sql.gz
 ```
 
-✅ `psql` prints `DROP ...`, `CREATE ...`, `COPY n` lines without `ERROR`, and the app shows the
-restored data.
+(`make prod-backup` first saves the current state, in case you pick the wrong file.)
+
+✅ It ends with `Restored backups/...` and no `ERROR` lines, and the app shows the restored
+data. If it stops with an error, the api stays stopped: fix the problem and run the restore
+again, or start the api with `dc start api`.
