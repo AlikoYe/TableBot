@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/alikhanyedilov/tablebot/backend/internal/bot"
+	"github.com/AlikoYe/TableBot/backend/internal/bot"
 )
 
 // Worker periodically looks for bookings that need a reminder.
@@ -38,9 +38,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// tick is one reminder pass.
-// TODO: select confirmed bookings starting soon with reminder_sent = false
-// (FOR UPDATE SKIP LOCKED), send via w.notifier, mark reminder_sent = true.
+// tick is one worker pass.
+// TODO: flip overdue pending bookings to 'expired'; send reminders for confirmed
+// bookings starting soon with reminder_sent = false, then mark reminder_sent.
 func (w *Worker) tick(ctx context.Context) {
 	w.log.DebugContext(ctx, "reminder tick")
 }

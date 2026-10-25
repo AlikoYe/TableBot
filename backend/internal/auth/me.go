@@ -5,33 +5,50 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/httpx"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/httpx"
 )
 
-// RoleResolver looks up the application role for a Telegram user.
-type RoleResolver interface {
-	RoleFor(ctx context.Context, telegramID int64) (string, error)
+// VenueOwnership lists the venues a user owns (venues.owner_id = telegram_id).
+type VenueOwnership interface {
+	OwnedVenueIDs(ctx context.Context, telegramID int64) ([]int64, error)
 }
 
 type meResponse struct {
-	User User   `json:"user"`
-	Role string `json:"role"`
+	TelegramID    int64   `json:"telegram_id"`
+	Name          string  `json:"name"`
+	Username      *string `json:"username"`
+	Role          string  `json:"role"`
+	IsOwner       bool    `json:"is_owner"`
+	OwnedVenueIDs []int64 `json:"owned_venue_ids"`
 }
 
-// MeHandler serves GET /api/me: the authenticated user and their role.
-func MeHandler(roles RoleResolver, log *slog.Logger) http.HandlerFunc {
+// MeHandler serves GET /api/me.
+func MeHandler(venues VenueOwnership, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := CurrentUser(r)
 		if !ok {
 			unauthorized(w, "not authenticated")
 			return
 		}
-		role, err := roles.RoleFor(r.Context(), user.ID)
+		ids, err := venues.OwnedVenueIDs(r.Context(), user.ID)
 		if err != nil {
-			log.ErrorContext(r.Context(), "resolve role", slog.Any("err", err))
+			log.ErrorContext(r.Context(), "owned venues", slog.Any("err", err))
 			httpx.Internal(w)
 			return
 		}
-		httpx.JSON(w, http.StatusOK, meResponse{User: user, Role: role})
+		if ids == nil {
+			ids = []int64{}
+		}
+		resp := meResponse{
+			TelegramID:    user.ID,
+			Name:          user.DisplayName(),
+			Role:          user.Role,
+			IsOwner:       len(ids) > 0,
+			OwnedVenueIDs: ids,
+		}
+		if user.Username != "" {
+			resp.Username = &user.Username
+		}
+		httpx.JSON(w, http.StatusOK, resp)
 	}
 }

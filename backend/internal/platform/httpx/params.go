@@ -23,7 +23,7 @@ func PathID(r *http.Request, name string) (int64, error) {
 }
 
 // QueryDate parses a required YYYY-MM-DD query parameter. The result is
-// midnight UTC of that date; converting to a restaurant's local day is the
+// midnight UTC of that date; converting to a venue's local day is the
 // service layer's job.
 func QueryDate(r *http.Request, name string) (time.Time, error) {
 	raw := r.URL.Query().Get(name)

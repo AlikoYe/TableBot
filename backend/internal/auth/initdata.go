@@ -45,6 +45,14 @@ type User struct {
 	LanguageCode string `json:"language_code,omitempty"`
 	IsPremium    bool   `json:"is_premium,omitempty"`
 	PhotoURL     string `json:"photo_url,omitempty"`
+
+	// Role comes from the users table; set by Middleware, never by initData.
+	Role string `json:"-"`
+}
+
+// DisplayName is "First Last" without extra spaces.
+func (u User) DisplayName() string {
+	return strings.TrimSpace(u.FirstName + " " + u.LastName)
 }
 
 // InitData is the validated, parsed initData.

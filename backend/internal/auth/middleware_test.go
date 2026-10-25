@@ -1,13 +1,15 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/httpx"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/httpx"
 )
 
 // echoUser responds with the user found in the request context.
@@ -20,8 +22,29 @@ var echoUser = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, u)
 })
 
+// fakeUsers records upserts and returns a fixed role or error.
+type fakeUsers struct {
+	role  string
+	err   error
+	saved []User
+}
+
+func (f *fakeUsers) Upsert(_ context.Context, u User) (string, error) {
+	f.saved = append(f.saved, u)
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.role == "" {
+		return "customer", nil
+	}
+	return f.role, nil
+}
+
 func serve(t *testing.T, opts Options, authHeader string) *httptest.ResponseRecorder {
 	t.Helper()
+	if opts.Users == nil {
+		opts.Users = &fakeUsers{}
+	}
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return testNow }
 	}
@@ -90,6 +113,40 @@ func TestMiddleware_DevBypass(t *testing.T) {
 
 	for _, bad := range []string{"dev abc", "dev -5", "dev 0"} {
 		assertUnauthorized(t, serve(t, Options{AppEnv: "dev"}, bad))
+	}
+}
+
+func TestMiddleware_UpsertsUserAndSetsRole(t *testing.T) {
+	initData := signInitData(t, validFields(testNow.Add(-time.Minute)), testBotToken)
+	users := &fakeUsers{role: "admin"}
+
+	var got User
+	h := Middleware(Options{BotToken: testBotToken, AppEnv: "prod", Users: users, Now: func() time.Time { return testNow }})(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got, _ = CurrentUser(r) }))
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "tma "+initData)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(users.saved) != 1 || users.saved[0].ID != 42 || users.saved[0].DisplayName() != "Ada Lovelace" {
+		t.Fatalf("upserted %+v, want user 42 Ada Lovelace", users.saved)
+	}
+	if got.Role != "admin" {
+		t.Errorf("role in context = %q, want admin", got.Role)
+	}
+}
+
+func TestMiddleware_UpsertFailureIs500(t *testing.T) {
+	rec := serve(t, Options{AppEnv: "dev", Users: &fakeUsers{err: errors.New("db down")}}, "dev 7")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func TestMiddleware_RejectedRequestsDoNotUpsert(t *testing.T) {
+	users := &fakeUsers{}
+	assertUnauthorized(t, serve(t, Options{AppEnv: "prod", Users: users}, "dev 7"))
+	if len(users.saved) != 0 {
+		t.Fatalf("upserted %d users for a rejected request", len(users.saved))
 	}
 }
 

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -8,12 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alikhanyedilov/tablebot/backend/internal/platform/httpx"
+	"github.com/AlikoYe/TableBot/backend/internal/platform/httpx"
 )
+
+// UserStore saves the authenticated user and returns their role.
+type UserStore interface {
+	Upsert(ctx context.Context, u User) (role string, err error)
+}
 
 // Options configures Middleware.
 type Options struct {
 	BotToken string
+	// Users is required: every authenticated request upserts the user so
+	// foreign keys to users always resolve.
+	Users UserStore
 	// AppEnv is the raw APP_ENV value. The dev bypass is enabled if and only
 	// if it equals "dev" exactly; callers cannot enable it any other way.
 	AppEnv string
@@ -27,9 +36,12 @@ type Options struct {
 //	Authorization: tma <initData>       (always)
 //	Authorization: dev <telegram_id>    (only when APP_ENV=dev)
 //
-// On success the user is stored in the request context; otherwise it
-// responds 401 with the standard error body.
+// On success the user is upserted and stored in the request context;
+// otherwise it responds 401 with the standard error body.
 func Middleware(opts Options) func(http.Handler) http.Handler {
+	if opts.Users == nil {
+		panic("auth: Options.Users is required")
+	}
 	devBypass := opts.AppEnv == "dev"
 	now := opts.Now
 	if now == nil {
@@ -75,6 +87,14 @@ func Middleware(opts Options) func(http.Handler) http.Handler {
 				unauthorized(w, "unsupported Authorization scheme")
 				return
 			}
+
+			role, err := opts.Users.Upsert(r.Context(), user)
+			if err != nil {
+				log.ErrorContext(r.Context(), "upsert user", slog.Int64("telegram_id", user.ID), slog.Any("err", err))
+				httpx.Internal(w)
+				return
+			}
+			user.Role = role
 
 			next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
 		})
