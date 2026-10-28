@@ -4,14 +4,15 @@ import { computed, ref } from 'vue'
 import { getMe } from '@/api/me'
 
 export const useSessionStore = defineStore('session', () => {
-  const user = ref(null)
-  const role = ref(null)
+  const me = ref(null)
   const error = ref(null)
   const loading = ref(false)
   let pending = null
 
-  const isStaff = computed(() => role.value === 'staff' || role.value === 'admin')
-  const loaded = computed(() => role.value !== null)
+  const loaded = computed(() => me.value !== null)
+  // Owning a venue is per venue, not a role (see /api/me).
+  const isOwner = computed(() => Boolean(me.value?.is_owner))
+  const ownedVenueIds = computed(() => me.value?.owned_venue_ids ?? [])
 
   /** Loads /api/me once; concurrent callers share the same request. */
   function load({ force = false } = {}) {
@@ -21,9 +22,8 @@ export const useSessionStore = defineStore('session', () => {
     loading.value = true
     error.value = null
     pending = getMe()
-      .then((me) => {
-        user.value = me.user
-        role.value = me.role
+      .then((data) => {
+        me.value = data
       })
       .catch((err) => {
         error.value = err
@@ -35,5 +35,5 @@ export const useSessionStore = defineStore('session', () => {
     return pending
   }
 
-  return { user, role, error, loading, loaded, isStaff, load }
+  return { me, error, loading, loaded, isOwner, ownedVenueIds, load }
 })

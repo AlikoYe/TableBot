@@ -16,7 +16,7 @@ export class UnauthorizedError extends ApiError {}
 export class ForbiddenError extends ApiError {}
 export class NotFoundError extends ApiError {}
 export class ConflictError extends ApiError {}
-export class NotImplementedError extends ApiError {}
+export class UnprocessableError extends ApiError {}
 
 /** The request never got a response (offline, DNS, CORS, aborted…). */
 export class NetworkError extends Error {
@@ -33,7 +33,7 @@ const errorClassByStatus = {
   403: ForbiddenError,
   404: NotFoundError,
   409: ConflictError,
-  501: NotImplementedError,
+  422: UnprocessableError,
 }
 
 function authorizationHeader() {

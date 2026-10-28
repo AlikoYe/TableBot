@@ -20,6 +20,12 @@ export function initTelegram() {
   if (isTelegram) {
     webApp.ready()
     webApp.expand()
+    try {
+      // Match the native header to the page background (Bot API 6.1+).
+      webApp.setHeaderColor('secondary_bg_color')
+    } catch {
+      /* older clients */
+    }
     webApp.onEvent('themeChanged', () => {
       colorScheme.value = webApp.colorScheme
     })
@@ -80,6 +86,25 @@ function confirmDialog(message) {
   return new Promise((resolve) => webApp.showConfirm(message, (ok) => resolve(Boolean(ok))))
 }
 
+/** Haptic feedback: 'success' | 'error' | 'warning' | 'tap'. No-op outside Telegram. */
+function haptic(kind = 'tap') {
+  const h = isTelegram ? webApp.HapticFeedback : null
+  if (!h) return
+  try {
+    if (kind === 'tap') h.selectionChanged()
+    else h.notificationOccurred(kind)
+  } catch {
+    /* older clients */
+  }
+}
+
+/** Opens a user's chat: inside Telegram natively, otherwise in a new tab. */
+function openChat(username) {
+  const url = `https://t.me/${username}`
+  if (isTelegram && webApp.openTelegramLink) webApp.openTelegramLink(url)
+  else window.open(url, '_blank', 'noopener')
+}
+
 export function useTelegram() {
   return {
     webApp,
@@ -93,5 +118,7 @@ export function useTelegram() {
     setMainButtonLoading,
     showBackButton,
     confirmDialog,
+    haptic,
+    openChat,
   }
 }

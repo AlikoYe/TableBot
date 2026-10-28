@@ -2,40 +2,39 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { useSessionStore } from '@/stores/session'
 
+// meta.nav: show the bottom tab bar. meta.back: show an in-page back bar outside Telegram.
 const routes = [
   {
     path: '/',
-    name: 'restaurants',
-    component: () => import('@/views/customer/RestaurantList.vue'),
+    name: 'venues',
+    component: () => import('@/views/customer/VenueList.vue'),
+    meta: { nav: true },
   },
   {
-    path: '/restaurants/:id',
-    name: 'slot-picker',
-    component: () => import('@/views/customer/SlotPicker.vue'),
+    path: '/venues/:id',
+    name: 'venue',
+    component: () => import('@/views/customer/VenueBooking.vue'),
     props: true,
+    meta: { back: true },
   },
   {
     path: '/bookings/:id/done',
     name: 'booking-done',
     component: () => import('@/views/customer/BookingDone.vue'),
     props: true,
+    meta: { back: true },
   },
   {
     path: '/my',
     name: 'my-bookings',
     component: () => import('@/views/customer/MyBookings.vue'),
+    meta: { nav: true },
   },
   {
-    path: '/staff',
-    name: 'staff-today',
-    component: () => import('@/views/staff/TodayBookings.vue'),
-    meta: { requiresStaff: true },
-  },
-  {
-    path: '/staff/capacity',
-    name: 'staff-capacity',
-    component: () => import('@/views/staff/Capacity.vue'),
-    meta: { requiresStaff: true },
+    path: '/owner',
+    name: 'owner',
+    component: () => import('@/views/owner/OwnerHome.vue'),
+    meta: { nav: true, requiresOwner: true },
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
@@ -45,12 +44,12 @@ const router = createRouter({
   routes,
 })
 
-// UX guard only; the API enforces staff access itself.
+// UX guard only; the API enforces venue ownership itself.
 router.beforeEach(async (to) => {
-  if (!to.meta.requiresStaff) return true
+  if (!to.meta.requiresOwner) return true
   const session = useSessionStore()
   await session.load()
-  return session.isStaff ? true : { name: 'restaurants' }
+  return session.isOwner ? true : { name: 'venues' }
 })
 
 export default router

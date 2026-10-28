@@ -1,19 +1,20 @@
 /*
  * Telegram injects --tg-theme-* variables on <html> inside the Mini App.
- * In a normal browser they are undefined, so each token falls back to a
- * light/dark default.
+ * Outside Telegram they are undefined, so every token falls back to a
+ * light/dark default. App.vue sets data-scheme="light|dark" from Telegram's
+ * colorScheme (or the OS preference) for the colors Telegram does not provide.
  */
 :root {
   --fallback-bg: #ffffff;
-  --fallback-secondary-bg: #f2f2f7;
+  --fallback-secondary-bg: #f1f1f4;
   --fallback-section-bg: #ffffff;
-  --fallback-text: #1c1c1e;
-  --fallback-hint: #8e8e93;
+  --fallback-text: #17171a;
+  --fallback-hint: #7b7b84;
   --fallback-link: #2481cc;
   --fallback-button: #2481cc;
   --fallback-button-text: #ffffff;
-  --fallback-destructive: #e53935;
-  --fallback-separator: #e5e5ea;
+  --fallback-destructive: #d93a35;
+  --fallback-separator: #e4e4e9;
 
   --bg: var(--tg-theme-bg-color, var(--fallback-bg));
   --secondary-bg: var(--tg-theme-secondary-bg-color, var(--fallback-secondary-bg));
@@ -26,38 +27,55 @@
   --destructive: var(--tg-theme-destructive-text-color, var(--fallback-destructive));
   --separator: var(--tg-theme-section-separator-color, var(--fallback-separator));
 
-  --radius: 12px;
-  --gap: 12px;
+  /* Booking and table states: not provided by Telegram, tuned per scheme. */
+  --ok: #1f9d63;
+  --wait: #c27c0e;
+  --free: #1f9d63;
 
-  color-scheme: light dark;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --gap: 12px;
+  --nav-h: 56px;
+
+  color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.4;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fallback-bg: #1c1c1e;
-    --fallback-secondary-bg: #000000;
-    --fallback-section-bg: #2c2c2e;
-    --fallback-text: #ffffff;
-    --fallback-hint: #98989f;
-    --fallback-link: #5eaef0;
-    --fallback-button: #3a8fd8;
-    --fallback-separator: #3a3a3c;
-  }
+:root[data-scheme='dark'] {
+  --fallback-bg: #1c1c1e;
+  --fallback-secondary-bg: #0e0e10;
+  --fallback-section-bg: #262629;
+  --fallback-text: #f4f4f6;
+  --fallback-hint: #9a9aa3;
+  --fallback-link: #5eaef0;
+  --fallback-button: #3a8fd8;
+  --fallback-destructive: #ff6b66;
+  --fallback-separator: #38383c;
+
+  --ok: #43c487;
+  --wait: #e9a33c;
+  --free: #43c487;
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
 }
 
 body {
-  margin: 0;
   background: var(--secondary-bg);
   color: var(--text);
   min-height: var(--tg-viewport-stable-height, 100vh);
   -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
 }
 
 a {
@@ -66,14 +84,28 @@ a {
 }
 
 h1 {
-  font-size: 1.4rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   margin: 0 0 var(--gap);
+}
+h2 {
+  font-size: 1.05rem;
+  margin: 0 0 8px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--button);
+  outline-offset: 2px;
 }
 
 .page {
-  padding: 16px;
+  padding: 16px 16px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
   max-width: 640px;
   margin: 0 auto;
+}
+.page.no-nav {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
 .card {
@@ -85,21 +117,39 @@ h1 {
   color: var(--text);
 }
 
+.section {
+  margin-bottom: 20px;
+}
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--hint);
+}
+
 .hint {
   color: var(--hint);
   font-size: 0.9rem;
 }
 
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 12px 16px;
   font: inherit;
   font-weight: 600;
   background: var(--button);
   color: var(--button-text);
   cursor: pointer;
+  text-decoration: none;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -108,15 +158,22 @@ h1 {
 .btn-block {
   width: 100%;
 }
-.btn-link {
-  background: none;
+.btn-quiet {
+  background: color-mix(in srgb, var(--button) 12%, transparent);
   color: var(--link);
-  padding: 4px 0;
 }
 .btn-danger {
-  background: none;
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
   color: var(--destructive);
-  padding: 4px 0;
+}
+.btn-small {
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+.btn-text {
+  background: none;
+  color: var(--link);
+  padding: 6px 0;
 }
 
 .field {
@@ -137,15 +194,11 @@ h1 {
   color: var(--text);
   background: var(--section-bg);
   border: 1px solid var(--separator);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
+  resize: vertical;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .chip {
   border: 1px solid var(--separator);
   background: var(--section-bg);
@@ -154,6 +207,7 @@ h1 {
   padding: 8px 14px;
   font: inherit;
   cursor: pointer;
+  white-space: nowrap;
 }
 .chip[aria-pressed='true'] {
   background: var(--button);
@@ -161,12 +215,24 @@ h1 {
   border-color: var(--button);
 }
 
-.badge {
-  display: inline-block;
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--secondary-bg);
-  color: var(--hint);
-  text-transform: capitalize;
+.banner {
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: var(--gap);
+  font-size: 0.92rem;
+  background: color-mix(in srgb, var(--wait) 14%, var(--section-bg));
+  color: var(--text);
+}
+.banner.error {
+  background: color-mix(in srgb, var(--destructive) 12%, var(--section-bg));
+  color: var(--destructive);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
