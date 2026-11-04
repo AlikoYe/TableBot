@@ -10,6 +10,7 @@ const venues = ref([])
 const loading = ref(true)
 const error = ref(null)
 const category = ref('all')
+const query = ref('')
 
 async function load() {
   loading.value = true
@@ -27,15 +28,31 @@ async function load() {
 const categories = computed(() =>
   categoryOrder.filter((c) => venues.value.some((v) => v.category === c)),
 )
-const shown = computed(() =>
-  category.value === 'all' ? venues.value : venues.value.filter((v) => v.category === category.value),
-)
+// Search matches name or address, ignoring case; it combines with the category filter.
+const shown = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  return venues.value.filter(
+    (v) =>
+      (category.value === 'all' || v.category === category.value) &&
+      (!q || v.name.toLowerCase().includes(q) || v.address.toLowerCase().includes(q)),
+  )
+})
 
 onMounted(load)
 </script>
 
 <template>
   <h1>Book a table</h1>
+
+  <input
+    v-if="venues.length > 1"
+    v-model="query"
+    class="search"
+    type="search"
+    placeholder="Search by name or street"
+    aria-label="Search venues"
+    enterkeyhint="search"
+  />
 
   <div v-if="categories.length > 1" class="filters" role="group" aria-label="Category">
     <button class="chip" type="button" :aria-pressed="category === 'all'" @click="category = 'all'">All</button>
@@ -55,7 +72,7 @@ onMounted(load)
     :loading
     :error
     :empty="!shown.length"
-    empty-text="No venues to book yet. Check back soon."
+    :empty-text="query.trim() || category !== 'all' ? 'No venues match. Try another name or filter.' : 'No venues to book yet. Check back soon.'"
     @retry="load"
   >
     <RouterLink v-for="v in shown" :key="v.id" :to="{ name: 'venue', params: { id: v.id } }" class="card venue">
@@ -71,6 +88,16 @@ onMounted(load)
 </template>
 
 <style scoped>
+.search {
+  width: 100%;
+  margin-bottom: 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--section-bg);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
 .filters {
   display: flex;
   gap: 8px;

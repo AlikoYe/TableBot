@@ -8,6 +8,7 @@ const messages = {
   in_past: 'That time has already passed. Pick a later time.',
   not_pending: 'This request was already answered or has expired.',
   not_cancellable: 'This booking can no longer be cancelled.',
+  label_taken: 'Another table at this venue already has that name.',
   forbidden: 'You do not manage this venue.',
   unauthorized: 'Your session has expired. Reopen the app from the bot.',
   not_found: 'We could not find that. It may have been removed.',
@@ -21,6 +22,12 @@ export function friendlyError(err) {
   if (err instanceof NetworkError) return 'No connection. Check your internet and try again.'
   if (err instanceof ApiError) return messages[err.code] ?? err.message
   return 'Something went wrong. Try again.'
+}
+
+/** Like friendlyError, but shows the server's validation message, which names the field. */
+export function formError(err) {
+  if (err instanceof ApiError && err.code === 'bad_request' && err.message) return err.message
+  return friendlyError(err)
 }
 
 export const errorCode = (err) => (err instanceof ApiError ? err.code : null)

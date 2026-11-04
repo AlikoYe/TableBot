@@ -7,6 +7,7 @@ import { useSessionStore } from '@/stores/session'
 import { addDays, relativeDay, todayIn } from '@/utils/format'
 import BookingsPanel from './BookingsPanel.vue'
 import FloorPanel from './FloorPanel.vue'
+import SetupPanel from './SetupPanel.vue'
 
 const session = useSessionStore()
 
@@ -47,6 +48,11 @@ watch(
 
 const shift = (n) => (date.value = addDays(date.value, n))
 
+function onVenueUpdated(v) {
+  const i = venues.value.findIndex((x) => x.id === v.id)
+  if (i >= 0) venues.value[i] = v
+}
+
 onMounted(load)
 </script>
 
@@ -75,7 +81,7 @@ onMounted(load)
       </div>
       <p v-else class="hint single">{{ venue.name }}</p>
 
-      <div class="day card">
+      <div v-if="tab !== 'setup'" class="day card">
         <button type="button" aria-label="Previous day" @click="shift(-1)">‹</button>
         <div class="label">
           <strong>{{ relativeDay(date, today) }}</strong>
@@ -87,10 +93,12 @@ onMounted(load)
       <div class="tabs" role="tablist">
         <button role="tab" type="button" :aria-selected="tab === 'bookings'" @click="tab = 'bookings'">Bookings</button>
         <button role="tab" type="button" :aria-selected="tab === 'floor'" @click="tab = 'floor'">Floor</button>
+        <button role="tab" type="button" :aria-selected="tab === 'setup'" @click="tab = 'setup'">Setup</button>
       </div>
 
       <BookingsPanel v-if="tab === 'bookings'" :key="`b-${venue.id}-${date}`" :venue="venue" :date="date" />
-      <FloorPanel v-else :key="`f-${venue.id}-${date}`" :venue="venue" :date="date" />
+      <FloorPanel v-else-if="tab === 'floor'" :key="`f-${venue.id}-${date}`" :venue="venue" :date="date" />
+      <SetupPanel v-else :key="`s-${venue.id}`" :venue="venue" @venue-updated="onVenueUpdated" />
     </template>
   </AsyncState>
 </template>
@@ -143,7 +151,7 @@ onMounted(load)
 
 .tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 2px;
   padding: 2px;
   margin-bottom: 16px;
