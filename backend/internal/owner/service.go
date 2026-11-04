@@ -27,12 +27,13 @@ type Notifier interface {
 type Service struct {
 	repo     *Repo
 	bookings *booking.Repo
+	venues   *venue.Repo
 	notifier Notifier
 	log      *slog.Logger
 }
 
-func NewService(repo *Repo, bookings *booking.Repo, notifier Notifier, log *slog.Logger) *Service {
-	return &Service{repo: repo, bookings: bookings, notifier: notifier, log: log}
+func NewService(repo *Repo, bookings *booking.Repo, venues *venue.Repo, notifier Notifier, log *slog.Logger) *Service {
+	return &Service{repo: repo, bookings: bookings, venues: venues, notifier: notifier, log: log}
 }
 
 // OwnedVenueIDs implements auth.VenueOwnership.
