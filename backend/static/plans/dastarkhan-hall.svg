@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>Dastarkhan Hall floor plan</title>
+  <rect x="0" y="0" width="1000" height="700" fill="#ffffff"/>
+  <rect x="20" y="20" width="960" height="660" fill="#faf7f2"/>
+  <rect x="20" y="20" width="180" height="200" fill="#ece8e1"/>
+  <path d="M200 20 V140 M200 200 V220 H20" fill="none" stroke="#5a5a5a" stroke-width="6"/>
+  <text x="110" y="127.333" text-anchor="middle" font-size="22" fill="#8a8273" font-weight="600">Kitchen</text>
+  <rect x="380" y="30" width="240" height="80" rx="16" fill="#e3e6df" stroke="#b9bfb2" stroke-width="3"/>
+  <text x="500" y="78" text-anchor="middle" font-size="24" fill="#7d8573" font-weight="600">Stage</text>
+  <rect x="420" y="400" width="200" height="140" rx="10" fill="#f1ebe0" stroke="#d6c8b0" stroke-width="3" stroke-dasharray="10 8"/>
+  <text x="520" y="476" text-anchor="middle" font-size="20" fill="#a08b68" font-weight="600">Dance floor</text>
+  <rect x="840" y="560" width="140" height="120" fill="#ece8e1"/>
+  <path d="M840 560 H900 M950 560 H980 M840 560 V680" fill="none" stroke="#5a5a5a" stroke-width="6"/>
+  <text x="910" y="627.333" text-anchor="middle" font-size="22" fill="#8a8273" font-weight="600">WC</text>
+  <path d="M450 680 H20 V20 H980 V680 H560" fill="none" stroke="#3a3a3a" stroke-width="10" stroke-linejoin="round"/>
+  <g stroke="#8cc4e8" stroke-width="10">
+    <line x1="980" y1="160" x2="980" y2="480"/>
+    <line x1="20" y1="300" x2="20" y2="500"/>
+  </g>
+  <g stroke="#ffffff" stroke-width="2">
+    <line x1="980" y1="160" x2="980" y2="480"/>
+    <line x1="20" y1="300" x2="20" y2="500"/>
+  </g>
+  <path d="M505 672 V630 M491 644 L505 628 L519 644" fill="none" stroke="#c0763a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="505" y="616" text-anchor="middle" font-size="20" fill="#c0763a" font-weight="600">Entrance</text>
+</svg>
