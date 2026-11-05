@@ -9,6 +9,7 @@ import (
 
 	"github.com/AlikoYe/TableBot/backend/internal/auth"
 	"github.com/AlikoYe/TableBot/backend/internal/platform/httpx"
+	"github.com/AlikoYe/TableBot/backend/internal/venue"
 )
 
 type Handler struct {
@@ -25,6 +26,10 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/bookings", h.list)
 	r.Post("/bookings/{id}/confirm", h.decide(true))
 	r.Post("/bookings/{id}/reject", h.decide(false))
+	r.Patch("/venues/{id}", h.updateVenue)
+	r.Get("/venues/{id}/tables", h.tables)
+	r.Post("/venues/{id}/tables", h.createTable)
+	r.Patch("/tables/{id}", h.updateTable)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -64,8 +69,88 @@ func (h *Handler) decide(confirm bool) http.HandlerFunc {
 	}
 }
 
+func (h *Handler) updateVenue(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.CurrentUser(r)
+	id, err := httpx.PathID(r, "id")
+	if err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	var p venue.VenuePatch
+	if err := httpx.DecodeJSON(w, r, &p); err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	v, err := h.svc.UpdateVenue(r.Context(), user.ID, id, p)
+	if err != nil {
+		h.fail(w, r, err, "venue not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, v)
+}
+
+func (h *Handler) tables(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.CurrentUser(r)
+	id, err := httpx.PathID(r, "id")
+	if err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	tables, err := h.svc.Tables(r.Context(), user.ID, id)
+	if err != nil {
+		h.fail(w, r, err, "venue not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, tables)
+}
+
+func (h *Handler) createTable(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.CurrentUser(r)
+	id, err := httpx.PathID(r, "id")
+	if err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	var p venue.TablePatch
+	if err := httpx.DecodeJSON(w, r, &p); err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	t, err := h.svc.CreateTable(r.Context(), user.ID, id, p)
+	if err != nil {
+		h.fail(w, r, err, "venue not found")
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, t)
+}
+
+func (h *Handler) updateTable(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.CurrentUser(r)
+	id, err := httpx.PathID(r, "id")
+	if err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	var p venue.TablePatch
+	if err := httpx.DecodeJSON(w, r, &p); err != nil {
+		httpx.BadRequest(w, err.Error())
+		return
+	}
+	t, err := h.svc.UpdateTable(r.Context(), user.ID, id, p)
+	if err != nil {
+		h.fail(w, r, err, "table not found")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, t)
+}
+
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error, notFound string) {
+	var invalid *venue.InvalidError
 	switch {
+	case errors.As(err, &invalid):
+		httpx.BadRequest(w, invalid.Msg)
+	case errors.Is(err, venue.ErrLabelTaken):
+		httpx.Error(w, http.StatusConflict, httpx.CodeLabelTaken, err.Error())
 	case errors.Is(err, ErrNotFound):
 		httpx.Error(w, http.StatusNotFound, httpx.CodeNotFound, notFound)
 	case errors.Is(err, ErrForbidden):

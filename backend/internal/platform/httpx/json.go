@@ -27,6 +27,7 @@ const (
 	CodeInPast         = "in_past"
 	CodeNotPending     = "not_pending"
 	CodeNotCancellable = "not_cancellable"
+	CodeLabelTaken     = "label_taken"
 )
 
 const maxBodyBytes = 1 << 20 // 1 MiB

@@ -25,8 +25,8 @@ Prerequisites: Go 1.26+, Node 20.19+ (22 recommended), Docker.
 ```bash
 cp .env.example .env      # APP_ENV=dev by default
 make dev                  # starts Postgres in docker, migrates, runs API + Vite
-make seed                 # 3 venues in Almaty owned by dev user 1; user 2 is a customer
-make seed OWNER=123456789 # same, but your own Telegram id owns the venues
+make seed                 # 10 venues in Almaty owned by dev user 1; user 2 is a customer
+make seed OWNER=123456789 # same, but your own Telegram id owns the new venues
 ```
 
 If you ran the old scaffold before (slot/capacity schema), run `make db-reset`
@@ -77,7 +77,8 @@ Set `SITE_ADDRESS=your.domain` for automatic HTTPS via Caddy.
 |--------|-------------|
 | `make dev` | Postgres (docker) + migrations + API and Vite on the host |
 | `make migrate-up` / `migrate-down` / `migrate-status` | goose migrations (embedded, via `cmd/migrate`) |
-| `make seed [OWNER=<id>]` | Load `backend/seed/dev.sql` (re-runnable) |
+| `make seed [OWNER=<id>]` | Add missing demo venues from `backend/seed/dev.sql` (never overwrites existing rows) |
+| `make set-owner VENUE=<id> OWNER=<id>` | Make a Telegram user the owner of one venue |
 | `make db-reset` | **Delete** the local Postgres volume, then migrate from scratch |
 | `make build` | `backend/bin/{api,migrate}` + `frontend/dist` |
 | `make test` | `go test -race ./...` (DB tests are skipped) |
@@ -85,7 +86,8 @@ Set `SITE_ADDRESS=your.domain` for automatic HTTPS via Caddy.
 | `make lint` | gofmt check, `go vet`, golangci-lint if installed |
 | `make up` / `down` / `logs` | Full docker stack (local) |
 | `make prod-up` / `prod-logs` / `prod-ps` / `prod-psql` / `prod-backup` | On the server: deploy the checkout, logs, status, DB shell, backup |
-| `make prod-seed OWNER=<id>` | On the server: demo venues owned by your Telegram id |
+| `make prod-seed OWNER=<id>` | On the server: add missing demo venues, owned by your Telegram id |
+| `make prod-set-owner VENUE=<id> OWNER=<id>` | On the server: change one venue's owner |
 
 ## Environment variables
 
@@ -165,7 +167,7 @@ backend/
     notify/           worker: expire unanswered requests, send reminders
     platform/         config, database (pgxpool), dbtest, logging (slog), httpx (JSON, errors, middleware)
   migrations/         0001_init.sql + embed.go + schema_test.go
-  seed/dev.sql        dev data (3 Almaty venues)
+  seed/dev.sql        dev data (10 Almaty venues, add-only)
   static/plans/       floor plan SVGs, embedded into the binary
 frontend/
   src/api/            client.js (fetch wrapper, typed errors) + one module per domain

@@ -43,8 +43,13 @@ db-up: ## Start only Postgres and wait until it is healthy
 	$(COMPOSE) up -d --wait postgres
 
 .PHONY: seed
-seed: ## Load dev seed data; OWNER=<telegram_id> owns all venues (default 1)
+seed: ## Add demo venues (never overwrites existing rows); new venues belong to OWNER=<telegram_id> (default 1)
 	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -v owner_id=$(OWNER) -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < backend/seed/dev.sql
+
+.PHONY: set-owner
+set-owner: ## Make a Telegram user the owner of one venue: make set-owner VENUE=2 OWNER=<telegram_id>
+	@if ! printf '%s' "$(VENUE)" | grep -Eq '^[0-9]+$$' || ! printf '%s' "$(OWNER)" | grep -Eq '^[0-9]+$$'; then echo "usage: make $@ VENUE=<venue id> OWNER=<telegram id>"; exit 1; fi
+	$(COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "INSERT INTO users (telegram_id, name) VALUES ($(OWNER), '"'"'Venue Owner'"'"') ON CONFLICT DO NOTHING; UPDATE venues SET owner_id = $(OWNER) WHERE id = $(VENUE); SELECT id, name, owner_id FROM venues ORDER BY id;"'
 
 .PHONY: db-reset
 db-reset: ## DELETE the local Postgres volume and start fresh (dev data is lost)
@@ -112,9 +117,14 @@ prod-ps: ## [server] Show container status
 	$(PROD_COMPOSE) ps -a
 
 .PHONY: prod-seed
-prod-seed: ## [server] Load demo venues owned by you: make prod-seed OWNER=<telegram_id>
+prod-seed: ## [server] Add missing demo venues (never overwrites existing rows): make prod-seed OWNER=<telegram_id>
 	@if [ "$(origin OWNER)" != "command line" ]; then echo "usage: make prod-seed OWNER=<your telegram id>  (find it with @userinfobot)"; exit 1; fi
 	$(PROD_COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -v owner_id=$(OWNER) -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < backend/seed/dev.sql
+
+.PHONY: prod-set-owner
+prod-set-owner: ## [server] Make a Telegram user the owner of one venue: make prod-set-owner VENUE=2 OWNER=<telegram_id>
+	@if ! printf '%s' "$(VENUE)" | grep -Eq '^[0-9]+$$' || ! printf '%s' "$(OWNER)" | grep -Eq '^[0-9]+$$'; then echo "usage: make $@ VENUE=<venue id> OWNER=<telegram id>"; exit 1; fi
+	$(PROD_COMPOSE) exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "INSERT INTO users (telegram_id, name) VALUES ($(OWNER), '"'"'Venue Owner'"'"') ON CONFLICT DO NOTHING; UPDATE venues SET owner_id = $(OWNER) WHERE id = $(VENUE); SELECT id, name, owner_id FROM venues ORDER BY id;"'
 
 .PHONY: prod-psql
 prod-psql: ## [server] Open psql on the production database

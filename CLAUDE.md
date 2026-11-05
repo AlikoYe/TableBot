@@ -19,7 +19,8 @@ backend/
     bookingstatus/      THE blocking / effective-status SQL; use it, never re-type it
     venue/              venues, schedule (start-time grid), free times, table map
     booking/            guest bookings
-    owner/              owner list + Decide (confirm/reject, shared by HTTP and bot)
+    owner/              owner list + Decide (confirm/reject, shared by HTTP and bot);
+                        editor.go: venue settings and tables (validation lives in venue/editor.go)
     bot/                Telegram: Sender interface, Notifier, /start, menu button, callbacks;
                         every user-facing text is in bot/texts.go
     notify/             background worker: expire overdue holds, send reminders
@@ -41,7 +42,9 @@ Each domain package uses **handler -> service -> repo**:
 ## Commands (run from the repo root)
 
 - `make dev` — Postgres in Docker, migrations, API on :8080 and Vite on :5173.
-- `make seed` / `make seed OWNER=<telegram_id>` — 3 Almaty venues owned by that user, plus customer user 2.
+- `make seed` / `make seed OWNER=<telegram_id>` — adds the 10 Almaty demo venues (new ones owned by that
+  user) and customer user 2. Add-only: existing rows are never changed.
+- `make set-owner VENUE=<id> OWNER=<telegram_id>` (server: `make prod-set-owner ...`) — change one venue's owner.
 - `make db-reset` — deletes the local Postgres volume and re-migrates (needed once after schema rewrites).
 - `make test` — unit tests; DB tests are skipped (it unsets `TEST_DATABASE_URL`).
 - `make test-db` — all tests incl. DB integration tests against the `tablebot_test`

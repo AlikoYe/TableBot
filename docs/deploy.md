@@ -26,6 +26,13 @@ Throughout this guide, replace:
   **22, 80 and 443** (TCP; also 443 UDP if you can). Let's Encrypt needs 80 and 443.
 - **DNS name**: in the VM's public IP resource → *Configuration* → *DNS name label*,
   set a label (e.g. `tablebot-g30`). That gives you `<host>`.
+- **Azure for Students**: the subscription may only create resources in a few regions
+  (Azure Policy "Allowed resource deployment regions"). Find them in the portal: **Policy**
+  -> **Assignments** -> that assignment -> **Parameters**, or in Cloud Shell:
+  `az policy assignment list --query "[].{name:displayName, params:parameters}" -o json`.
+  "RequestDisallowedByAzure" when creating the VM means the region is not on that list.
+  Size: **B2als_v2** (2 vCPU, 4 GB, about $28/month); 1 GB sizes are too small to build the images.
+  Turn **auto-shutdown off**.
 - **A production bot**: create a *second* bot in [@BotFather](https://t.me/BotFather)
   for production and keep its token handy. Your laptop keeps using the dev bot (see
   "One token, one place" below).
@@ -37,6 +44,24 @@ Throughout this guide, replace:
 > **Laptop = dev bot token, server = prod bot token. Never mix them.**
 
 ## 1. SSH into the server
+
+If Azure generated the key (`tablebot-vm_key.pem`), add a shortcut on your Mac once:
+
+```bash
+mv ~/Downloads/tablebot-vm_key.pem ~/.ssh/ && chmod 400 ~/.ssh/tablebot-vm_key.pem
+cat >> ~/.ssh/config <<'CONFIG'
+
+Host tablebot <host>
+  HostName <host>
+  User azureuser
+  IdentityFile ~/.ssh/tablebot-vm_key.pem
+CONFIG
+```
+
+Then `ssh tablebot` works, and so does every `ssh azureuser@<host>` below.
+
+> **Before pasting any command, check the prompt.** `azureuser@tablebot-vm:~$` is the server;
+> `MacBook...$` is your laptop. Server commands run on the laptop can overwrite your local `.env`.
 
 On your Mac:
 
@@ -136,7 +161,20 @@ cd /opt/tablebot
 make prod-seed OWNER=<your-telegram-id>
 ```
 
-✅ The output ends with `COMMIT`. You now own the 3 demo venues (restaurant, billiards, cafe).
+✅ The output ends with `COMMIT`. You now own the 10 demo venues.
+
+The seed only **adds** what is missing: re-running it (for example after an update adds
+venues) never changes tables an owner edited in the app, and never changes existing owners.
+
+To give one venue to someone else (they should open the app once first; otherwise a
+placeholder user is created for them):
+
+```bash
+make prod-set-owner VENUE=2 OWNER=<their telegram id>
+```
+
+The output lists every venue with its owner. Owners manage their venue in the app:
+**Manage** -> **Setup** (tables on the plan, opening hours, booking length).
 
 ## 6. Try it in Telegram
 

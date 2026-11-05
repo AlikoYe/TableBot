@@ -34,13 +34,14 @@ type services struct {
 }
 
 func newServices(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, notifier Notifier) services {
-	venueSvc := venue.NewService(venue.NewRepo(pool))
+	venueRepo := venue.NewRepo(pool)
+	venueSvc := venue.NewService(venueRepo)
 	bookingRepo := booking.NewRepo(pool)
 	return services{
 		venues:      venueSvc,
 		bookings:    booking.NewService(bookingRepo, venueSvc, notifier, cfg.HoldMinutes, log),
 		bookingRepo: bookingRepo,
-		owner:       owner.NewService(owner.NewRepo(pool), bookingRepo, notifier, log),
+		owner:       owner.NewService(owner.NewRepo(pool), bookingRepo, venueRepo, notifier, log),
 	}
 }
 

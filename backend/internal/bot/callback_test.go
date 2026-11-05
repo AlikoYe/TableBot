@@ -15,6 +15,7 @@ import (
 	"github.com/AlikoYe/TableBot/backend/internal/booking"
 	"github.com/AlikoYe/TableBot/backend/internal/owner"
 	"github.com/AlikoYe/TableBot/backend/internal/platform/dbtest"
+	"github.com/AlikoYe/TableBot/backend/internal/venue"
 )
 
 // callbackEnv runs callbacks through the real owner service against a test DB.
@@ -37,7 +38,7 @@ func newCallbackEnv(t *testing.T) callbackEnv {
 	fs := &fakeSender{}
 	log := slog.New(slog.DiscardHandler)
 	n := testNotifier(fs, &bytes.Buffer{})
-	svc := owner.NewService(owner.NewRepo(db), booking.NewRepo(db), n, log)
+	svc := owner.NewService(owner.NewRepo(db), booking.NewRepo(db), venue.NewRepo(db), n, log)
 	return callbackEnv{db: db, fs: fs, n: n, bot: NewWithSender(fs, svc, "", log)}
 }
 
