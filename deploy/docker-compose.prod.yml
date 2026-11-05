@@ -2,6 +2,9 @@
 #   docker compose -p tablebot --env-file .env \
 #     -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 # deploy/deploy.sh and the prod-* make targets do this for you.
+# Nothing here publishes a port: the shared edge proxy (project "edge", installed from
+# github.com/AlikoYe/tutorhub deploy/edge) owns 80/443 and reaches the web container on the
+# external "edge" network as tablebot-web:80.
 
 x-logging: &logging
   driver: json-file
@@ -34,8 +37,22 @@ services:
       context: ..
       dockerfile: deploy/web.Dockerfile
     image: tablebot-web:latest
+    ports: !reset []
+    environment:
+      # Plain HTTP behind the edge proxy, whatever .env says.
+      SITE_ADDRESS: ":80"
     volumes: !override
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      default: {}
+      edge:
+        # Unique on the shared network: other projects' web containers are also called "caddy".
+        aliases:
+          - tablebot-web
     restart: unless-stopped
     logging: *logging
+
+networks:
+  edge:
+    external: true
