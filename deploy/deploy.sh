@@ -49,28 +49,24 @@ main() {
 
   step "Deploying commit $(git rev-parse --short HEAD): $(git log -1 --format=%s)"
 
+  step "Docker network \"edge\" (shared with the edge proxy and other projects)"
+  docker network create edge 2>/dev/null || true
+
   step "Building images and starting containers (first run takes a few minutes)"
   compose up -d --build --remove-orphans
 
   step "Removing unused images"
   docker image prune -f >/dev/null
 
-  local url check
-  if [[ "$site" == :* ]]; then
-    url="http://127.0.0.1${site}/api/health"
-    check=(curl -fsS --max-time 5 "$url")
-  else
-    url="https://${site}/api/health"
-    # --resolve hits this machine directly, so the check does not depend on external DNS.
-    check=(curl -fsS --max-time 5 --resolve "${site}:443:127.0.0.1" "$url")
-  fi
-
-  step "Waiting up to ${HEALTH_TIMEOUT}s for $url"
+  # Health is checked inside the web container, so it does not depend on the edge proxy or DNS.
+  local url="http://tablebot-web/api/health"
+  step "Waiting up to ${HEALTH_TIMEOUT}s for $url (inside the web container)"
   local deadline=$((SECONDS + HEALTH_TIMEOUT)) body=""
   while ((SECONDS < deadline)); do
-    if body="$("${check[@]}" 2>/dev/null)" && [[ "$body" == *'"status":"ok"'* ]]; then
+    if body="$(compose exec -T caddy wget -qO- http://127.0.0.1/api/health 2>/dev/null)" && [[ "$body" == *'"status":"ok"'* ]]; then
       step "Deploy OK: $url -> $body"
       compose ps
+      public_check "$site"
       return 0
     fi
     sleep 3
@@ -85,6 +81,19 @@ main() {
   done
   printf '\nSee the troubleshooting table in docs/deploy.md.\n' >&2
   exit 1
+}
+
+# public_check reports whether the site answers through the edge proxy; it never fails the deploy.
+public_check() {
+  local site="$1" status
+  [[ "$site" == :* ]] && return 0
+  step "Public check through the edge proxy: https://$site/api/health"
+  # --resolve hits this machine directly, so the check does not depend on external DNS.
+  if status="$(curl -fsS --max-time 10 --resolve "${site}:443:127.0.0.1" "https://${site}/api/health" 2>&1)"; then
+    echo "OK: $status"
+  else
+    echo "WARNING: not reachable through the edge proxy yet ($status). See docs/deploy.md (Edge proxy)."
+  fi
 }
 
 # Same line on purpose: bash never reads past it, even if git reset rewrote this file.

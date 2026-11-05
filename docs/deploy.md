@@ -199,6 +199,24 @@ and then `deploy`.
 ✅ Both jobs are green, and the `deploy` log ends with `Deploy OK: https://<host>/api/health`.
 A failed deploy shows the container logs right in the job output.
 
+## Edge proxy (shared with TutorHub)
+
+TableBot no longer publishes ports 80/443 itself. A shared **edge proxy** (Docker Compose
+project `edge`, installed from `github.com/AlikoYe/tutorhub` → `deploy/edge`, files in
+`/opt/edge`) owns 80/443, gets the HTTPS certificates and forwards
+`tablebot-g30.indiasouthcentral.cloudapp.azure.com` to TableBot's web container, which joins
+the external Docker network `edge` as `tablebot-web` and serves plain HTTP on `:80`
+(`SITE_ADDRESS` is forced to `:80` in `deploy/docker-compose.prod.yml`; keep your domain in
+`.env` anyway: `deploy.sh` uses it for the public check).
+
+- `deploy.sh` creates the `edge` network if it is missing and checks health **inside** the web
+  container, so a deploy succeeds even while the edge is down; it then prints a public check
+  through the edge (a warning, never a failure).
+- The cutover order (merge this change, then start the edge immediately) and the one-command
+  rollback (`bash /opt/tutorhub/deploy/edge/rollback-tablebot.sh`, which puts 80/443 back on
+  TableBot's own Caddy) are in TutorHub's `docs/deploy.md`.
+- Edge logs: `docker compose -p edge -f /opt/edge/docker-compose.yml logs -f edge`.
+
 ## Everyday commands (on the server, in `/opt/tablebot`)
 
 | Task | Command |
